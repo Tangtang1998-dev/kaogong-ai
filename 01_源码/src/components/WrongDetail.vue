@@ -712,10 +712,10 @@ function capWrongExplain() {
                   >{{ r }}</span>
                 </div>
               </div>
-              <!-- 收纳盒②：我的历史错因（自定义/AI 生成，默认折叠，可删改） -->
+              <!-- 收纳盒②：仅本题历史/已采纳错因，禁止跨题混入 -->
               <div v-if="boxReasons.length" class="reason-box">
                 <button type="button" class="reason-box-hd" @click="reasonBoxOpen = !reasonBoxOpen">
-                  📦 我的历史错因（{{ boxReasons.length }}）{{ reasonBoxOpen ? '▾ 收起' : '▸ 展开' }}
+                  📦 本题历史错因（{{ boxReasons.length }}）{{ reasonBoxOpen ? '▾ 收起' : '▸ 展开' }}
                 </button>
                 <div v-if="reasonBoxOpen" class="chips">
                   <span

@@ -28,6 +28,7 @@ import { ankiAddNote } from '../utils/ankiConnect'
 import { addPoints as petAddPoints, buildWrongAnalysis, petAnalyzeCurrent, petFastCfg } from '../utils/pet'
 import { GENERIC_REASONS, SUBJ_REASONS } from '../data/wrongReasons'
 import { parseCoachAiReply } from '../utils/wrongReasonCoach'
+import { wrongDetailKeyOf, ownWrongReasons } from '../utils/wrongDetailState'
 
 import WrongVault from './WrongVault.vue'
 import WrongList from './WrongList.vue'
@@ -680,8 +681,48 @@ function focusRedo(q) {
   openRedo()
 }
 
+let detailEpoch = 0
+function detailStillActive(epoch, q) {
+  return epoch === detailEpoch && !!q && cur.value >= 0 && store.wqs[cur.value] === q
+}
+function resetWrongDetailState() {
+  detailEpoch++
+  aiBusy.value = false
+  aiPreview.value = null
+  aiGuideBusy.value = false
+  guideText.value = ''
+  aiPolishBusy.value = false
+  customReason.value = ''
+  reasonBoxOpen.value = false
+  presetBoxOpen.value = false
+  reasonModal.value = null
+  editQShow.value = false
+  editQText.value = ''
+  editQAnswer.value = ''
+  editQGroup.value = ''
+  editQSub.value = ''
+  editQType.value = ''
+  imgView.value = null
+  vtShow.value = false
+  vtBusy.value = false
+  vtMode.value = 'pick'
+  vtQueue.value = []
+  vtIdx.value = 0
+  vtPick.value = ''
+  vtAnswers.value = {}
+  vtScore.value = 0
+  vtOpen.value = {}
+  vtSource.value = 'lib'
+  vtDifficulty.value = 'mid'
+  vtCount.value = 3
+  vtCmpBusy.value = false
+  vtCmpText.value = ''
+  coreAiBusy.value = false
+  coreAiText.value = ''
+}
 function openRaw(idx) {
   if (idx < 0) return
+  resetWrongDetailState()
   cur.value = idx
   aiPreview.value = null
   show.value = true
@@ -761,7 +802,10 @@ const presetReasons = computed(() => {
   return (q ? reasonsFor(q.subject) : GENERIC_REASONS).slice()
 })
 // 收纳盒：用户自定义池里「非预设且未勾选」的历史错因，默认折叠，可展开删改
-const boxReasons = computed(() => userReasons.value.filter((r) => !presetReasons.value.includes(r) && !frm.value.sel.includes(r)))
+const boxReasons = computed(() => {
+  const q = cur.value >= 0 ? store.wqs[cur.value] : null
+  return ownWrongReasons(q, presetReasons.value, frm.value.sel)
+})
 const presetBoxOpen = ref(false)
 // 顶部始终显示：本题已勾选的全部错因（预设勾选无删改；自定义/AI 勾选带 ✎✕）
 const checkedAllReasons = computed(() => frm.value.sel.slice())
@@ -771,6 +815,7 @@ const guideText = ref('')
 async function askAiGuide() {
   const q = cur.value >= 0 ? store.wqs[cur.value] : null
   if (!q || aiGuideBusy.value) return
+  const epoch = detailEpoch
   const ctx = origCtx()
   const myAnswer = String(q.your || q.answerUser || '').trim()
   const rightAns = String(q.answer || q.ans || q.correct || '').trim()
@@ -781,13 +826,15 @@ async function askAiGuide() {
     const sys = '你是行测资深讲师。请**引导**考生自己发现错因，而不是直接给结论：围绕"我错在哪一步、我当时是怎么想的、正确的判断标准是什么"提出 2-3 个层层递进的问题，让考生自己回答后自然得出错因。'
     const userContent = `板块：${q.subject || '未分类'}\n题干：${(ctx.text || '').slice(0, 500)}\n我的作答：${myAnswer || '（未记录）'}\n正确答案：${rightAns || '（未知）'}\n正确解析：${analysis || '（无）'}\n\n请只输出引导问题（200 字内），不要给答案，不要说"你可以这样归纳"。`
     return String((await chatOnce(c, [{ role: 'user', content: sys + '\n' + userContent }], 500, 30000)) || '').trim() || '（AI 未返回，请重试）'
-  }, { onError: (e) => { guideText.value = 'AI 引导失败：' + (e && e.message) } })
+  }, { onError: (e) => { if (detailStillActive(epoch, q)) guideText.value = 'AI 引导失败：' + (e && e.message) } })
+  if (!detailStillActive(epoch, q)) return
   if (out != null) guideText.value = out
   aiGuideBusy.value = false
 }
 // ===== AI 规范化自定义错因：把口语化表述改写成专业化、可指导下次避免 =====
 const aiPolishBusy = ref(false)
 async function aiPolishReason() {
+  const epoch = detailEpoch
   const raw = customReason.value.trim()
   if (!raw) { showToast('先在输入框写下你的原因，再点「✨ 规范化」', 'info'); return }
   if (aiPolishBusy.value) return
@@ -796,7 +843,8 @@ async function aiPolishReason() {
     const sys = '你是行测错因整理专家。把考生口语化的错因改写成专业、具体、可指导下次避免的表述（1-2 条），只输出 JSON 数组，如 ["…", "…"]，不要多余文字。'
     return await chatOnce(c, [{ role: 'user', content: sys + '\n\n我的原话：' + raw }], 400, 30000)
   }, { keyHint: '文字模型' })
-  if (reply == null) { aiPolishBusy.value = false; return }
+  if (reply == null) { if (epoch === detailEpoch) aiPolishBusy.value = false; return }
+  if (epoch !== detailEpoch) return
   try {
     let arr = null
     try { arr = JSON.parse(String(reply || '').trim()) } catch (e) { const m = String(reply || '').match(/\[[\s\S]*\]/); if (m) { try { arr = JSON.parse(m[0]) } catch (_) {} } }
@@ -811,7 +859,7 @@ async function aiPolishReason() {
   } catch (e) {
     showToast('规范化失败：' + (e && e.message), 'error')
   } finally {
-    aiPolishBusy.value = false
+    if (epoch === detailEpoch) aiPolishBusy.value = false
   }
 }
 function addCustomReason() {
@@ -947,6 +995,8 @@ function vtStartDo() {
   }
 }
 async function generateAiVariants(n, level = 'mid') {
+  const base = cur.value >= 0 ? store.wqs[cur.value] : null
+  const epoch = detailEpoch
   try {
     const diffs = vtDiffPlan(n, level)
     const jobs = []
@@ -954,18 +1004,20 @@ async function generateAiVariants(n, level = 'mid') {
       jobs.push(vtAskAi(i + 1, n, diffs[i] || 'mid'))
     }
     const items = (await Promise.all(jobs)).filter(Boolean)
+    if (!detailStillActive(epoch, base)) return
     vtQueue.value.push(...items)
     if (!vtQueue.value.length) { vtClose(); return }
     vtIdx.value = 0
     vtPick.value = ''
     showToast('🤖 已生成 ' + vtQueue.value.length + ' 道 AI 变式，开始作答', 'success')
   } finally {
-    vtBusy.value = false
+    if (epoch === detailEpoch) vtBusy.value = false
   }
 }
 async function vtAskAi(idx = 1, n = 1, level = 'mid') {
   const q = cur.value >= 0 ? store.wqs[cur.value] : null
   if (!q) return null
+  const epoch = detailEpoch
   const c = pickGenCfg()
   if (!c || !c.key) {
     showToast('请先配置文字模型 API Key（设置 → 模型）', 'error')
@@ -986,9 +1038,10 @@ async function vtAskAi(idx = 1, n = 1, level = 'mid') {
   try {
     reply = String((await chatOnce(c, [{ role: 'user', content: sys + '\n\n【原题】' + stem + '\n【原答案】' + (q.answer || '') + (core ? '\n【原题骨架/考点参考】' + core : '') }], 1000, 30000)) || '')
   } catch (e) {
-    showToast('变式生成失败：' + String((e && e.message) || e).slice(0, 80), 'error')
+    if (detailStillActive(epoch, q)) showToast('变式生成失败：' + String((e && e.message) || e).slice(0, 80), 'error')
     return null
   }
+  if (!detailStillActive(epoch, q)) return null
   if (!reply) { showToast('变式生成失败：模型未返回内容', 'error'); return null }
   let obj = null
   const rawTxt = String(reply || '').replace(/```json|```/g, '').trim()
@@ -1135,6 +1188,7 @@ function localSkeletonFallback(q, tpl) {
 async function askCoreDeep() {
   const q = cur.value >= 0 ? store.wqs[cur.value] : null
   if (!q || coreAiBusy.value) return
+  const epoch = detailEpoch
   const tpl = CORE_TEMPLATES[q.subject || ''] || CORE_TEMPLATES['常识判断']
   coreAiBusy.value = true
   coreAiText.value = ''
@@ -1145,6 +1199,7 @@ async function askCoreDeep() {
       const mine = [q.method ? '秒杀：' + q.method : '', q.note ? '笔记：' + q.note : ''].filter(Boolean).join('\n').slice(0, 300)
       return await chatOnce(c, [{ role: 'system', content: sys }, { role: 'user', content: '【题目】' + stem + '\n\n板块要点参考：' + tpl.points.join('；') + (mine ? '\n\n【本题个人复盘】' + mine : '') }], maxTokensFor(c, 1800), 90000)
     }, { label: 'AI 深度剖析' })
+    if (!detailStillActive(epoch, q)) return
     coreAiText.value = out || localSkeletonFallback(q, tpl)
     const text = String(coreAiText.value || '')
     const pick = (re) => {
@@ -1162,7 +1217,7 @@ async function askCoreDeep() {
     q.mastery = questionMastery(q)
     saveWqs()
   } finally {
-    coreAiBusy.value = false
+    if (epoch === detailEpoch) coreAiBusy.value = false
   }
 }
 // 全错 → AI 深度横向比较复盘（原题 × 各变式）
@@ -1171,6 +1226,7 @@ const vtCmpText = ref('')
 async function vtDeepCompare() {
   const base = cur.value >= 0 ? store.wqs[cur.value] : null
   if (!base || vtCmpBusy.value) return
+  const epoch = detailEpoch
   vtCmpBusy.value = true
   vtCmpText.value = ''
   try {
@@ -1180,6 +1236,7 @@ async function vtDeepCompare() {
       const sys = '你是行测名师。用户原题和变式题全部做错，请做「横向比较复盘」帮其突破瓶颈：1) 一句话点出这组题共同的考点与命题套路；2) 用对比方式指出原题与每道变式的共同点与差异点（改了什么参数/换了什么素材/陷阱如何迁移）；3) 给出一条能贯穿所有题的「核心突破口」口诀。请直接输出可读正文，不要只说“无法回答”。'
       return await chatOnce(c, [{ role: 'system', content: sys }, { role: 'user', content: '【原题】' + orig + (base.answer ? '\n原题答案：' + base.answer : '') + '\n\n' + vars }], maxTokensFor(c, 1800), 90000)
     }, { label: 'AI 横向比较' })
+    if (!detailStillActive(epoch, base)) return
     vtCmpText.value = out || [
       '🤖 AI 横向比较暂时不可用，先用这张自查清单对比：',
       '1. 共同点：原题和每道变式的“考点结构”是否一样？先别被新话题带跑。',
@@ -1188,7 +1245,7 @@ async function vtDeepCompare() {
       '4. 下一步：把上方原题和变式复制到对话页，让我继续深讲。'
     ].join('\n')
   } finally {
-    vtCmpBusy.value = false
+    if (epoch === detailEpoch) vtCmpBusy.value = false
   }
 }
 function maxTokensFor(c, fallback = 1800) {
@@ -1360,11 +1417,12 @@ async function askAiReasons() {
   const q = store.wqs[cur.value]
   if (!q) return
   if (aiBusy.value) return
+  const epoch = detailEpoch
   const ctx = origCtx()
   const rawImgs = ctx.imgs || []
   // 先用 useAi 取配置（未配 Key 时返回 null 并 toast）；busy 在此之后再置位，避免与 aiRun 的 busy 互斥
   const c = await aiRun(async (cc) => cc, { cfgKey: rawImgs.length > 0 })
-  if (c == null) return
+  if (c == null || !detailStillActive(epoch, q)) return
   aiBusy.value = true
   const withImg = rawImgs.length > 0 && supportsVision(c)
   try {
@@ -1416,6 +1474,7 @@ AI 当时的解答：${aiReply || '（无）'}
       messages = [{ role: 'user', content: (sys + '\n' + userContent) + (rawImgs.length ? '\n（提示：我未提供原图，请基于题干文字判断，并提醒我如需更精准可重新存错题）' : '') }]
     }
     const reply = await chatOnce(c, messages, 1400, 60000)
+    if (!detailStillActive(epoch, q)) return
     const obj = parseCoachAiReply(reply) || parseByField(reply)
     if (obj) {
       const normalized = {
@@ -1447,9 +1506,9 @@ AI 当时的解答：${aiReply || '（无）'}
       showToast('AI 暂无返回，请重试', 'info')
     }
   } catch (e) {
-    showToast('调用失败：' + e.message, 'error')
+    if (detailStillActive(epoch, q)) showToast('调用失败：' + e.message, 'error')
   } finally {
-    aiBusy.value = false
+    if (epoch === detailEpoch) aiBusy.value = false
   }
 }
 function toggleAiPreviewField(field, index = -1) {
@@ -1580,6 +1639,10 @@ watch([show, cur, rep, redo, cardShow, cardIdx, focusShow, vtShow, vtMode, vtIdx
   () => { nextTick(() => { try { mountCharts(document.querySelector('.page.on')) } catch (e) {} }) },
   { flush: 'post' })
 
+const wrongDetailKey = computed(() => {
+  const q = cur.value >= 0 ? store.wqs[cur.value] : null
+  return wrongDetailKeyOf(cur.value, q)
+})
 const wrongCtx = reactive({
   PAGE, addCustomReason, aiBusy, aiPreview, aiGuideBusy, aiPolishBusy, aiPolishReason, applyCoachReview,
   applyAiPreview, cancelAiPreview, toggleAiPreviewField,
@@ -1626,7 +1689,7 @@ fState, reasonTop, setReasonFilter, startReasonPractice, openHub,
       <WrongVault :ctx="wrongCtx" />
       <WrongList :ctx="wrongCtx" />
     </div>
-    <WrongDetail :ctx="wrongCtx" />
+    <WrongDetail :key="wrongDetailKey" :ctx="wrongCtx" />
     <WrongRedo :ctx="wrongCtx" />
     <WrongFocus :ctx="wrongCtx" />
     <WrongCards :ctx="wrongCtx" />

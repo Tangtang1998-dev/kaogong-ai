@@ -421,8 +421,15 @@ const expBusy = ref(false)
 const expTpl = ref('full') // 错题导出模板：full 完整 / stems 只题干 / separate 题答分离
 const setShow = ref(false)
 const moreShow = ref(false) // 手机端顶栏「⋯」更多菜单
+const topCompact = ref(false) // 横屏/移动端：收起品牌、考试状态与页签，给内容更多空间
+try { topCompact.value = localStorage.getItem('xc_top_compact') === '1' } catch (e) {}
 function toggleMore() { moreShow.value = !moreShow.value }
 function moreGo(fn) { moreShow.value = false; fn() }
+function toggleTopCompact() {
+  topCompact.value = !topCompact.value
+  moreShow.value = false
+  try { localStorage.setItem('xc_top_compact', topCompact.value ? '1' : '0') } catch (e) {}
+}
 // ===== AI 用量与花费（实时追踪）=====
 const costShow = ref(false)
 const costStat = computed(() => costStats())
@@ -2498,6 +2505,7 @@ onUnmounted(() => {
   </div>
   <div v-if="wallStyle" class="bg-layer" :style="wallStyle"></div>
 <div class="app is-2d" :class="{ 'has-wall': wallStyle }">
+    <div v-show="!topCompact" id="xcTopChrome" class="top-chrome">
     <header class="topbar">
       <div class="brand">
         <span class="brand-logo">🧠</span>
@@ -2599,6 +2607,7 @@ onUnmounted(() => {
           <button class="top-mm-it" @click="moreGo(() => openExp('chat'))">📤 导出</button>
           <button class="top-mm-it" @click="moreGo(() => openSet())">⚙️ 设置</button>
           <button class="top-mm-it" @click="moreGo(() => doTheme())">{{ theme === 'light' ? '🌙 深色' : '☀️ 浅色' }}</button>
+          <button class="top-mm-it" @click="moreGo(() => toggleTopCompact())">▴ 收起顶部信息区</button>
         </div>
       </div>
     </header>
@@ -2607,7 +2616,15 @@ onUnmounted(() => {
       <button v-for="t in visibleTabs" :key="t.k" class="tab" :class="{ on: store.tab === t.k || (t.k === 'sync' && setShow && setGroup === 'data') }" @click="goTab(t.k)">
         {{ t.t }}
       </button>
+      <button class="tab top-compact-toggle" aria-controls="xcTopChrome" :aria-expanded="!topCompact" title="收起品牌、状态和页签，给横屏对话留出更多空间" @click="toggleTopCompact()">▴ 收起顶部</button>
     </nav>
+    </div>
+    <div v-if="topCompact" class="top-compact-bar" aria-label="顶部信息区已收起">
+      <button class="top-compact-expand" aria-controls="xcTopChrome" aria-expanded="false" title="展开品牌、状态和页签" @click="toggleTopCompact()">▾ 展开顶部</button>
+      <span class="top-compact-current">{{ (visibleTabs.find((t) => t.k === store.tab) || {}).t || store.tab }}</span>
+      <button v-if="nav.stack.length" class="top-compact-back" title="返回上一层" @click="onPopState(); navBack()">← {{ nav.stack[nav.stack.length - 1].label }}</button>
+      <span class="top-compact-hint">已收起 · 更多对话空间</span>
+    </div>
     <div class="pg" :class="{ on: store.tab === 'chat' }"><ChatPage @export-review="openExp('review')" /></div>
     <div class="pg" :class="{ on: store.tab === 'kb' }"><KbPage /></div>
     <div class="pg" :class="{ on: store.tab === 'stat' }"><StatsPage /></div>

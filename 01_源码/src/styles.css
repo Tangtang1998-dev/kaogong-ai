@@ -159,6 +159,12 @@ body {
   z-index: 50;
   gap: 8px;
 }
+.top-chrome {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+  min-height: 0;
+}
 body[data-theme='light'] .topbar {
   background: rgba(255, 255, 255, 0.72);
 }
@@ -208,6 +214,77 @@ body[data-theme='light'] .topbar {
 }
 .tab.on b {
   color: var(--accent);
+}
+.top-compact-toggle {
+  position: sticky;
+  right: 0;
+  margin-left: auto;
+  z-index: 2;
+  border-color: var(--glass-border);
+  background: var(--glass-bg-strong);
+  color: var(--text2);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+}
+.top-compact-toggle:hover {
+  color: var(--accent-strong, var(--accent));
+  border-color: var(--accent);
+}
+.top-compact-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  padding: 3px 10px;
+  flex: 0 0 auto;
+  z-index: 50;
+  border-bottom: 1px solid var(--glass-border);
+  background: var(--glass-bg-strong);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+}
+.top-compact-expand {
+  min-height: 24px;
+  padding: 1px 9px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--accent2);
+  color: var(--accent-strong, var(--accent));
+  font-family: inherit;
+  font-size: calc(11.5px * var(--ui-fs-scale, 1));
+  font-weight: 800;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.top-compact-current {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text);
+  font-size: calc(12px * var(--ui-fs-scale, 1));
+  font-weight: 800;
+  white-space: nowrap;
+}
+.top-compact-back {
+  min-height: 24px;
+  padding: 1px 8px;
+  border: 1px solid var(--glass-border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text2);
+  font-family: inherit;
+  font-size: calc(11.5px * var(--ui-fs-scale, 1));
+  cursor: pointer;
+  white-space: nowrap;
+}
+.top-compact-hint {
+  margin-left: auto;
+  color: var(--text3);
+  font-size: calc(10.5px * var(--ui-fs-scale, 1));
+  white-space: nowrap;
+}
+body[data-theme='light'] .top-compact-bar {
+  background: rgba(255, 255, 255, 0.86);
 }
 body[data-theme='light'] .tab.on {
   background: var(--accent2);
@@ -2417,6 +2494,9 @@ body::before {
   .top-acts { display: none; }
   .top-more { display: block; }
   .srch { display: none; }
+  .top-compact-bar { min-height: 32px; padding: 4px 8px; gap: 6px; }
+  .top-compact-hint { display: none; }
+  .top-compact-current { flex: 1; }
 }
 
 /* 设置面板桌面加宽（≤1440 保持居中，1280 下更舒展） */

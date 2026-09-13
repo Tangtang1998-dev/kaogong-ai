@@ -58,7 +58,31 @@ export async function shareBackup(name) {
   return false
 }
 
-export function restoreAll(obj) {
+const RESTORE_PRIORITY = ['xc_wqs', 'xc_wq_deleted', 'xc_wq_reasons', 'xc_notes', 'xc_my_mem', 'xc_msgs']
+
+function orderedRestoreKeys(items) {
+  const rank = new Map(RESTORE_PRIORITY.map((k, i) => [k, i]))
+  return Object.keys(items).filter((k) => String(k).startsWith('xc_')).sort((a, b) => {
+    const ra = rank.has(a) ? rank.get(a) : RESTORE_PRIORITY.length
+    const rb = rank.has(b) ? rank.get(b) : RESTORE_PRIORITY.length
+    return ra - rb
+  })
+}
+
+// 云同步里的 cfg 只保存 *** 占位；恢复/合并时用本机实际密钥补回，既不泄露也不误清空。
+export function mergeMaskedConfig(masked, local) {
+  if (masked === '***') return local
+  if (Array.isArray(masked)) return masked.map((v, i) => mergeMaskedConfig(v, Array.isArray(local) ? local[i] : undefined))
+  if (masked && typeof masked === 'object') {
+    const base = local && typeof local === 'object' && !Array.isArray(local) ? local : {}
+    const out = { ...base }
+    for (const k of Object.keys(masked)) out[k] = mergeMaskedConfig(masked[k], base[k])
+    return out
+  }
+  return masked
+}
+
+export function restoreAllDetailed(obj) {
   let items = null
   if (obj && obj.data && (obj.v === 2 || obj.app === 'xingce')) items = obj.data
   else if (obj && typeof obj === 'object') items = obj // 兼容旧格式
@@ -66,20 +90,29 @@ export function restoreAll(obj) {
   let prevCfg = {}
   try { prevCfg = JSON.parse(localStorage.getItem('xc_cfg') || '{}') } catch (e) {}
   let n = 0
-  for (const k in items) {
-    if (!String(k).startsWith('xc_')) continue
+  const restored = []
+  const failed = []
+  for (const k of orderedRestoreKeys(items)) {
     let v = items[k]
     if (k === 'xc_cfg') {
       try {
-        const cur = JSON.parse(String(v))
-        for (const f in cur) {
-          if (cur[f] === '***' && prevCfg[f] !== undefined) cur[f] = prevCfg[f]
-          else if (cur[f] === '***') delete cur[f]
-        }
+        const cur = mergeMaskedConfig(JSON.parse(String(v)), prevCfg)
         v = JSON.stringify(cur)
       } catch (e) {}
     }
-    try { localStorage.setItem(k, v); n++ } catch (e) {}
+    try {
+      const raw = String(v)
+      localStorage.setItem(k, raw)
+      if (localStorage.getItem(k) !== raw) throw new Error('readback mismatch')
+      restored.push(k)
+      n++
+    } catch (e) {
+      failed.push(k)
+    }
   }
-  return n
+  return { n, restored, failed }
+}
+
+export function restoreAll(obj) {
+  return restoreAllDetailed(obj).n
 }

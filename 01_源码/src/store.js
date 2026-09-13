@@ -176,8 +176,8 @@ export function load() {
     const m = localStorage.getItem('xc_msgs')
     // 批次6-6A 版本迁移：先过统一迁移层再载入（首个真实迁移后续按 MIGRATIONS 追加）
     const migrated = migrate(KEYS.MSGS, 1)
-    if (migrated != null) store.msgs = Array.isArray(migrated) ? migrated.slice(-200) : []
-    else if (m) { try { store.msgs = JSON.parse(m).slice(-200) } catch (e) {} }
+    if (migrated != null) store.msgs = Array.isArray(migrated) ? migrated : []
+    else if (m) { try { store.msgs = JSON.parse(m) } catch (e) {} }
   } catch (e) {}
   try {
     const w = localStorage.getItem('xc_wqs')
@@ -236,23 +236,29 @@ export function load() {
   } catch (e) {}
 }
 export const saveCfg = () => { safeSet(KEYS.CFG, store.cfg) }
+function serializeMsgs(list, level = 0) {
+  return JSON.stringify(list, (k, v) => {
+    if (k === '_html' || k === '_htmlKey' || k === '_bk') return undefined
+    if (typeof v === 'string' && v.startsWith('data:image')) {
+      if (level >= 1) return ''
+      if (v.length > 800000) return ''
+    }
+    if (level >= 1 && (k === 'imgs' || k === 'images') && Array.isArray(v)) return []
+    if (level >= 2 && k === 'img' && typeof v === 'string' && v.startsWith('data:')) return ''
+    return v
+  })
+}
 export const saveMsgs = () => {
-  try {
-    // 压缩过大的图片 dataURL，避免 localStorage 超限导致历史丢失（用户用图提问截图常很大）
-    const slim = JSON.stringify(store.msgs.slice(-200), (k, v) => {
-      // 超大图直接置空（避免占位符字符串被当成图片 URL 发到 API 报 Unsupported image_url format）
-      if (typeof v === 'string' && v.length > 800000 && v.startsWith('data:image')) {
-        return ''
-      }
-      // 批次5-P5-2 渲染缓存字段不入持久化（_html/_htmlKey 为运行时缓存，重启后重建）
-      if (k === '_html' || k === '_htmlKey' || k === '_bk') {
-        return undefined
-      }
-      return v
-    })
-    // 写盘走统一持久化层：保留 slim 裁剪（超大图/渲染缓存字段剔除），QuotaExceeded 由 safeSet 降级
-    safeSet(KEYS.MSGS, JSON.parse(slim))
-  } catch (e) {}
+  const list = Array.isArray(store.msgs) ? store.msgs : []
+  // 历史对话必须保留完整消息条数；空间不足时只逐级剥离图片/渲染缓存，绝不静默截掉旧对话。
+  for (const level of [0, 1, 2]) {
+    try {
+      localStorage.setItem(KEYS.MSGS, serializeMsgs(list, level))
+      return true
+    } catch (e) { /* 进入下一级轻量化重试 */ }
+  }
+  try { showToast('存储空间不足：历史对话暂存在内存中，请立即导出备份', 'error') } catch (e) {}
+  return false
 }
 // ===== 错题查重与去重：完全相同的题只存一道 =====
 // ===== 错题完整性校验：非完整题目/对话回复消息不允许导入 =====

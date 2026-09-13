@@ -6,6 +6,7 @@ import {
   buildLocalCoachFallback,
   buildOneClickDraft,
   fingerprintCoachContext,
+  isCoachPlanReusable,
   normalizeCoachState,
   parseCoachPlan,
   parseCoachAiReply,
@@ -89,6 +90,22 @@ describe('wrongReasonCoach 分步复盘整理', () => {
     expect(rc.fingerprint).toBe('fp1')
     expect(rc.answers.reflect).toEqual({ value: COACH_OTHER, custom: '我只看了一半' })
     expect(rc.answers.block.value).toBe('公式用错')
+  })
+
+  it('有 API Key 时不会复用本地兜底缓存，确保自动按题生成 AI 选项', () => {
+    const fp = 'fp_auto'
+    const local = normalizeCoachState({
+      fingerprint: fp,
+      mode: 'taxonomy',
+      steps: [
+        { id: 'reflect', options: [{ label: 'A' }, { label: 'B' }] },
+        { id: 'block', options: [{ label: 'C' }, { label: 'D' }] },
+        { id: 'action', options: [{ label: 'E' }, { label: 'F' }] }
+      ]
+    }, fp)
+    expect(isCoachPlanReusable(local, fp, false)).toBe(true)
+    expect(isCoachPlanReusable(local, fp, true)).toBe(false)
+    expect(isCoachPlanReusable({ ...local, mode: 'ai' }, fp, true)).toBe(true)
   })
 
   it('一键草稿保留依据并限制脏字段长度', () => {

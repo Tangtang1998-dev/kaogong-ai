@@ -21,6 +21,7 @@ import {
   buildCoachPayload,
   buildLocalCoachFallback,
   fingerprintCoachContext,
+  isCoachPlanReusable,
   normalizeCoachState,
   parseCoachPlan
 } from '../utils/wrongReasonCoach'
@@ -267,7 +268,10 @@ async function refreshCoachPlan(force = false) {
   const input = coachContextInput()
   const fp = fingerprintCoachContext(input)
   const rc = normalizeCoachState(q.reasonCoach || {}, fp)
-  if (!force && rc.steps.length >= 3 && rc.fingerprint === fp) {
+  let cfg = null
+  try { cfg = activeCfg(input.hasImage) } catch (e) {}
+  const hasApiKey = !!(cfg && cfg.key)
+  if (!force && isCoachPlanReusable(rc, fp, hasApiKey)) {
     setCoachPlan({ steps: rc.steps, source: rc.mode, notice: rc.notice }, fp)
     return
   }
@@ -275,8 +279,7 @@ async function refreshCoachPlan(force = false) {
   setCoachPlan(fallback, fp)
   coachPlan.value.loading = true
   try {
-    const c = activeCfg(input.hasImage)
-    if (!c || !c.key) {
+    if (!hasApiKey) {
       coachPlan.value.loading = false
       syncCoachState(q, { steps: fallback.steps, mode: 'taxonomy', source: 'local', notice: fallback.notice, generatedAt: Date.now() })
       return
@@ -284,10 +287,10 @@ async function refreshCoachPlan(force = false) {
     const sys = '你是行测错题复盘教练。请只输出严格 JSON，不要 Markdown 围栏。必须返回：{"notice":"一句话提醒","steps":[{"id":"reflect","title":"当时怎么想","prompt":"针对本题的追问","options":[{"label":"具体选项","hint":"短解释"}]},{"id":"block","title":"真正卡在哪一步","prompt":"针对上一阶段继续追问","options":[{"label":"具体选项","hint":"短解释"}]},{"id":"action","title":"下次先做什么","prompt":"给出可执行动作","options":[{"label":"具体选项","hint":"短解释"}]}]}。每步必须 4-6 个短选项，必须结合题干、考生作答、正确答案、解析和相同三级分类的历史错因；不得编造考生没有表达过的心理活动，不得给空泛的“粗心/审题不清”。' 
     const user = '请按以上 JSON 输出动态三步复盘选项。上下文：' + JSON.stringify(input)
     const imgs = (q.imgs || []).slice(0, 2)
-    const messages = imgs.length && supportsVision(c)
+    const messages = imgs.length && supportsVision(cfg)
       ? [{ role: 'user', content: [{ type: 'text', text: sys + '\n' + user }, ...imgs.map((u) => ({ type: 'image_url', image_url: { url: u } }))] }]
       : [{ role: 'user', content: sys + '\n' + user }]
-    const reply = await chatOnce(c, messages, 900, 45000)
+    const reply = await chatOnce(cfg, messages, 900, 45000)
     const parsed = parseCoachPlan(reply)
     if (parsed && parsed.steps.length >= 3) {
       setCoachPlan(parsed, fp)
@@ -754,12 +757,13 @@ function capWrongExplain() {
               <div v-if="coachOpen" class="coach-panel">
                 <div class="coach-progress">
                   <span v-for="(s, i) in coachPlan.steps" :key="s.id" :class="{ on: coachStep >= i }">{{ i + 1 }} {{ s.title }}</span>
+                  <span class="coach-source" :class="{ ai: coachPlan.mode === 'ai', busy: coachPlan.loading }">{{ coachPlan.loading ? 'AI 正在结合本题生成…' : coachPlan.mode === 'ai' ? 'AI 已按本题生成' : '本地题型选项' }}</span>
                 </div>
                 <template v-if="coachPlan.steps[coachStep]">
                   <div class="coach-q">{{ coachPlan.steps[coachStep].prompt }}</div>
                   <div v-if="coachPlan.notice" class="coach-notice">{{ coachPlan.notice }}</div>
-                  <button v-for="o in coachPlan.steps[coachStep].options" :key="o.id" class="coach-opt" :class="{ on: coachAnswers[coachPlan.steps[coachStep].id] && coachAnswers[coachPlan.steps[coachStep].id].value === o.label }" @click="pickCoachOption(coachPlan.steps[coachStep].id, o.label)"><b>{{ o.label }}</b><span>{{ o.hint }}</span></button>
-                  <button class="coach-opt" :class="{ on: coachAnswers[coachPlan.steps[coachStep].id] && coachAnswers[coachPlan.steps[coachStep].id].value === COACH_OTHER }" @click="pickCoachOption(coachPlan.steps[coachStep].id, COACH_OTHER)"><b>其他（自写）</b><span>选项都不贴合，我用原话写</span></button>
+                  <button v-for="o in coachPlan.steps[coachStep].options" :key="o.id" type="button" class="coach-opt" :aria-pressed="!!(coachAnswers[coachPlan.steps[coachStep].id] && coachAnswers[coachPlan.steps[coachStep].id].value === o.label)" :class="{ on: coachAnswers[coachPlan.steps[coachStep].id] && coachAnswers[coachPlan.steps[coachStep].id].value === o.label }" @click="pickCoachOption(coachPlan.steps[coachStep].id, o.label)"><b>{{ o.label }}</b><span>{{ o.hint }}</span></button>
+                  <button type="button" class="coach-opt" :aria-pressed="!!(coachAnswers[coachPlan.steps[coachStep].id] && coachAnswers[coachPlan.steps[coachStep].id].value === COACH_OTHER)" :class="{ on: coachAnswers[coachPlan.steps[coachStep].id] && coachAnswers[coachPlan.steps[coachStep].id].value === COACH_OTHER }" @click="pickCoachOption(coachPlan.steps[coachStep].id, COACH_OTHER)"><b>其他（自写）</b><span>选项都不贴合，我用原话写</span></button>
                   <textarea v-if="coachAnswers[coachPlan.steps[coachStep].id] && coachAnswers[coachPlan.steps[coachStep].id].value === COACH_OTHER" v-model="coachAnswers[coachPlan.steps[coachStep].id].custom" rows="2" placeholder="写下你真实的想法、卡点或下一步动作"></textarea>
                   <textarea v-if="coachStep === 2" v-model="coachWrote" rows="3" placeholder="补充你自己的话（可空）：这次最真实的感受、容易忽略的点或想提醒自己的话"></textarea>
                 </template>

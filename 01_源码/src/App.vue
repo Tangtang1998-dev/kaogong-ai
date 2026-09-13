@@ -2013,7 +2013,7 @@ function scheduleCloudApply() {
     if (store.busy) { scheduleCloudApply(); return }
     try {
       const ms = localStorage.getItem('xc_msgs')
-      if (ms != null) { const p = JSON.parse(ms); if (Array.isArray(p)) store.msgs = p.slice(-200) }
+      if (ms != null) { const p = JSON.parse(ms); if (Array.isArray(p)) store.msgs = p }
       const ws = localStorage.getItem('xc_wqs')
       if (ws != null) { const p = JSON.parse(ws); if (Array.isArray(p)) store.wqs = p }
       const mm = localStorage.getItem('xc_my_mem')

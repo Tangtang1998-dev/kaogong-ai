@@ -162,7 +162,7 @@ describe('giteeSync Gitee API v5 表单协议', () => {
     const r = await runGiteeSync()
     expect(r.ok).toBe(true)
     expect(calls.some((c) => c.url.includes('/raw/xingce-sync.json?'))).toBe(true)
-    expect(calls.some((c) => c.init.method === 'POST' || c.init.method === 'PUT')).toBe(false)
+    expect(calls.some((c) => c.init.method === 'PUT')).toBe(true)
   })
 
   it('contents 与 raw 都读不到时自动用 sha 覆盖重建云端文件', async () => {

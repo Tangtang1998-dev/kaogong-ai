@@ -165,7 +165,7 @@ function presetEngineReady(engine) {
   if (engine === 'dash') return !!(store.cfg.ttsDash && store.cfg.ttsDash.key)
   return false
 }
-// 角色声线绑定独立于 xc_cfg：xc_cfg 含密钥且不参与云同步；voiceBindings 只含克隆 voice ID，可随学习数据同步，
+// 角色声线绑定独立于 xc_cfg：xc_cfg 的密钥字段只上传占位；voiceBindings 只含克隆 voice ID，可随学习数据同步，
 // 保证同一账号在手机/网页/iPad 上复用同一套克隆结果，不再每台设备重复克隆。
 const VOICE_BINDINGS_KEY = 'xc_voice_bindings'
 function loadVoiceBindings() {

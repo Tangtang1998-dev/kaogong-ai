@@ -3,8 +3,7 @@
 // GitHub API 支持 CORS，适合网页 / iPad / 安卓直接用同一 Token 互通。
 /* global btoa, atob */
 import { store, saveCfg } from '../store'
-import { collectAll, restoreAll } from './dataBackup'
-import { applyLocalMerge, hydrateStoreFromPlan, readSyncState, saveSyncState, syncBaseline, makeCloudEnvelope, cloudEnvelopeMeta, syncDataHash, syncDeviceInfo, syncOverview } from './cloudSync'
+import { applyLocalMerge, hydrateStoreFromPlan, readSyncState, saveSyncState, syncBaseline, makeCloudEnvelope, cloudEnvelopeMeta, syncDataHash, syncDeviceInfo, syncOverview, restoreCloudSnapshot, collectCloudData } from './cloudSync'
 
 const GH_API = 'https://api.github.com'
 const DEFAULT_REPO = 'xingce-ai-cloud-sync'
@@ -158,7 +157,7 @@ export async function runGitHubSync() {
   const state = readSyncState()
   const remoteMeta = cloudEnvelopeMeta(remoteRaw)
   const preferRemote = !!remoteRaw && remoteMeta.t > state.remoteT && !syncOverview().dirty
-  const plan = applyLocalMerge(collectAll(), remoteRaw, state.base, { preferRemote })
+  const plan = applyLocalMerge(collectCloudData(), remoteRaw, state.base, { preferRemote })
   hydrateStoreFromPlan(plan)
   const body = makeCloudEnvelope(plan.merged)
   let putTs = remoteRaw && remoteRaw.t ? Number(remoteRaw.t) : 0
@@ -198,7 +197,7 @@ export async function runGitHubUpload(options = {}) {
   const remoteFile = await readGitHubRemote(repoInfo.full)
   const remoteRaw = remoteFile && remoteFile.obj ? remoteFile.obj : null
   const state = readSyncState()
-  const local = collectAll()
+  const local = collectCloudData()
   const meta = cloudEnvelopeMeta(remoteRaw)
   const sameAsLocal = remoteRaw ? syncDataHash(remoteRaw) === syncDataHash(local) : false
   if (remoteRaw && !options.force && !sameAsLocal && (state.kind !== 'gh' || meta.t > state.remoteT)) {
@@ -233,14 +232,14 @@ export async function runGitHubDownload(options = {}) {
   if (!remoteFile || !remoteFile.obj) throw new Error('GitHub 云端还没有可用同步文件；请先在任一设备上传本机版本')
   const remoteRaw = remoteFile.obj
   const state = readSyncState()
-  const local = collectAll()
+  const local = collectCloudData()
   const remoteHash = syncDataHash(remoteRaw)
   const localHash = syncDataHash(local)
   const meta = cloudEnvelopeMeta(remoteRaw)
   if (localHash !== remoteHash && !options.force && (state.kind !== 'gh' || (state.baseHash && localHash !== state.baseHash))) {
     return { ok: false, needsConfirm: true, direction: 'download', remoteT: meta.t, remoteDevice: meta.deviceLabel, repo: repoInfo.full }
   }
-  const n = restoreAll(remoteRaw)
+  const restored = restoreCloudSnapshot(remoteRaw)
   saveSyncState({
     ...state,
     last: Date.now(),
@@ -252,5 +251,5 @@ export async function runGitHubDownload(options = {}) {
     baseHash: remoteHash,
     lastStat: 'GitHub 已下载云端版本 ' + new Date(meta.t || Date.now()).toLocaleString()
   })
-  return { ok: true, changed: n > 0, ts: meta.t || Date.now(), direction: 'download', repo: repoInfo.full }
+  return { ok: true, changed: restored.n > 0, ts: meta.t || Date.now(), direction: 'download', repo: repoInfo.full, restored: restored.restored, failed: restored.failed }
 }

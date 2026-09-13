@@ -1,15 +1,16 @@
 // cloudSync.js —— 多端“安全合并云同步”
 // 网页 / iPad / 安卓共用同一份 WebDAV 文件；同步时先把云端拉下来与本机做集合级合并，
-// 避免“后打开的一端整包覆盖另一端”。xc_cfg（含 API Key / WebDAV 密码）与纯本机 UI 键不同步。
+// 避免“后打开的一端整包覆盖另一端”。学习数据与设置全量同步；API Key / WebDAV 密码只上传 *** 占位。
 import { store } from '../store'
-import { collectAll, restoreAll } from './dataBackup'
+import { collectAll, restoreAllDetailed, mergeMaskedConfig } from './dataBackup'
+import { stripSecrets } from './stripSecrets'
 import { webdavSyncUrl, wdAuthHeaders, webdavGet, webdavPutFile } from './webdav'
 import { WRONG_DELETED_KEY, filterDeletedWrongs, parseWrongDeleted } from './wrongDelete'
 
 export const SYNC_STATE_KEY = 'xc_sync_state'
 const LOCAL_ONLY_KEYS = new Set([
   'xc_auth', 'xc_auth_verify', 'xc_errlog', 'xc_global_fab',
-  'xc_chat_tools', 'xc_chat_draft', 'xc_recent_qs', 'xc_onboarded',
+  'xc_chat_tools', 'xc_onboarded',
   'xc_guided', 'xc_guides_off', 'xc_draft_fab_on', 'xc_draft_opacity',
   'xc_draft_mode', 'xc_draft_size', 'xc_draft_mini_pos', 'xc_weak_toast',
   'xc_wq_due_tip', 'xc_pdf_tree', 'xc_pdf_tree_name', 'xc_pdf_online_order',
@@ -22,7 +23,6 @@ const LOCAL_ONLY_PREFIXES = [
 
 export function shouldSyncKey(k) {
   if (!String(k || '').startsWith('xc_')) return false
-  if (k === 'xc_cfg') return false
   if (LOCAL_ONLY_KEYS.has(k)) return false
   if (LOCAL_ONLY_PREFIXES.some((p) => String(k).startsWith(p))) return false
   return true
@@ -65,6 +65,24 @@ export function cloudSyncUrl() {
   const base = String(w.url || '').trim()
   if (!base) throw new Error('请先填写 WebDAV 地址')
   return webdavSyncUrl(base)
+}
+
+// 云上传以当前内存中的完整学习数据为准，避免本地因空间紧张压缩图片后，云端也只收到压缩版。
+export function collectCloudData() {
+  const all = collectAll()
+  if (!all.data || typeof all.data !== 'object') all.data = {}
+  const put = (key, value) => {
+    if (value === undefined || value === null) return
+    all.data[key] = typeof value === 'string' ? value : JSON.stringify(value)
+  }
+  if (Array.isArray(store.msgs)) {
+    put('xc_msgs', JSON.stringify(store.msgs, (k, v) => (k === '_html' || k === '_htmlKey' || k === '_bk' ? undefined : v)))
+  }
+  if (Array.isArray(store.wqs)) put('xc_wqs', store.wqs)
+  if (Array.isArray(store.notes)) put('xc_notes', store.notes)
+  if (Array.isArray(store.myMem)) put('xc_my_mem', store.myMem)
+  if (store.mode) put('xc_mode', store.mode)
+  return all
 }
 
 export function readSyncState() {
@@ -134,7 +152,16 @@ export function syncDeviceInfo() {
 }
 
 export function makeCloudEnvelope(data) {
-  return { app: 'xingce', v: 3, kind: 'cloud-sync', t: Date.now(), device: syncDeviceInfo(), data }
+  const safe = {}
+  for (const k in (data || {})) {
+    if (!shouldSyncKey(k)) continue
+    if (k === 'xc_cfg') {
+      try { safe[k] = JSON.stringify(stripSecrets(JSON.parse(String(data[k] || '{}')))) } catch (e) { safe[k] = data[k] }
+    } else {
+      safe[k] = data[k]
+    }
+  }
+  return { app: 'xingce', v: 3, kind: 'cloud-sync', t: Date.now(), device: syncDeviceInfo(), data: safe }
 }
 
 export function cloudEnvelopeMeta(raw) {
@@ -307,7 +334,7 @@ export function syncDataHash(dataOrEnvelope) {
 
 export function syncOverview() {
   const state = readSyncState()
-  const currentHash = syncDataHash(collectAll())
+  const currentHash = syncDataHash(collectCloudData())
   return {
     ...state,
     currentHash,
@@ -317,47 +344,28 @@ export function syncOverview() {
 }
 
 function compactForStorage(key, raw) {
-  if (key === 'xc_attempts') {
-    try {
-      const arr = JSON.parse(String(raw || '[]'))
-      if (Array.isArray(arr) && arr.length > 2000) return JSON.stringify(arr.slice(-2000))
-    } catch (e) {}
-  }
   if (key === 'xc_msgs') {
     try {
       const arr = JSON.parse(String(raw || '[]'))
       if (!Array.isArray(arr)) return raw
-      const keep = arr.slice(-120)
-      const trimmed = keep.map((m, i) => {
-        if (!m || typeof m !== 'object') return m
-        if (i >= keep.length - 30) return m
-        const x = { ...m }
-        if (Array.isArray(x.imgs) && x.imgs.length) x.imgs = []
-        if (x.img && String(x.img).startsWith('data:')) x.img = ''
-        if (Array.isArray(x.content)) x.content = x.content.filter((c) => !(c && c.type === 'image_url'))
-        return x
-      })
-      const out = JSON.stringify(trimmed)
-      return out.length < String(raw).length ? out : raw
-    } catch (e) {}
-  }
-  if (key === 'xc_wqs') {
-    try {
-      const arr = JSON.parse(String(raw || '[]'))
-      if (!Array.isArray(arr)) return raw
       let changed = false
-      const trimmed = arr.map((q, i) => {
-        if (!q || typeof q !== 'object') return q
-        const x = { ...q }
-        if (Array.isArray(x.imgs) && x.imgs.length && i < arr.length - 80 && String(x.question || '').length > 80) {
-          x.imgs = []
-          changed = true
+      const trimmed = arr.map((m) => {
+        if (!m || typeof m !== 'object') return m
+        const x = { ...m }
+        if (Array.isArray(x.imgs) && x.imgs.length) { x.imgs = []; changed = true }
+        if (x.img && String(x.img).startsWith('data:')) { x.img = ''; changed = true }
+        if (Array.isArray(x.content)) {
+          const content = x.content.map((c) => c && c.type === 'image_url' ? { ...c, image_url: { url: '' } } : c)
+          if (content.some((c, i) => c !== x.content[i])) { x.content = content; changed = true }
         }
         return x
       })
       const out = JSON.stringify(trimmed)
       return changed && out.length < String(raw).length ? out : raw
     } catch (e) {}
+  }
+  if (key === 'xc_wqs') {
+    return raw
   }
   return raw
 }
@@ -384,7 +392,13 @@ function writeMerged(data) {
   let compacted = false
   for (const k in data) {
     if (!shouldSyncKey(k)) continue
-    const raw = String(data[k] == null ? '' : data[k])
+    let raw = String(data[k] == null ? '' : data[k])
+    if (k === 'xc_cfg') {
+      try {
+        const cur = JSON.parse(localStorage.getItem(k) || '{}')
+        raw = JSON.stringify(mergeMaskedConfig(JSON.parse(raw || '{}'), cur))
+      } catch (e) {}
+    }
     if (localStorage.getItem(k) === raw) continue
     const r = setStorageValue(k, raw)
     if (r.ok) {
@@ -436,7 +450,7 @@ export function hydrateStoreFromPlan(plan) {
   // 但对话页用的还是内存里的旧数组（store.msgs），表现为「另一端的聊天记录没同步」。
   // 现在把主要集合一起回填到界面，同步完成后无需刷新即可看到。
   const msgs = parseArr('xc_msgs')
-  if (msgs) store.msgs = msgs.slice(-200)
+  if (msgs) store.msgs = msgs
   const wqs = parseArr('xc_wqs')
   if (wqs) {
     try { store.wqs = filterDeletedWrongs(wqs, parseWrongDeleted(m[WRONG_DELETED_KEY])) }
@@ -449,6 +463,27 @@ export function hydrateStoreFromPlan(plan) {
   if (typeof m.xc_mode === 'string' && m.xc_mode) {
     try { store.mode = JSON.parse(m.xc_mode) } catch (e) { store.mode = m.xc_mode }
   }
+}
+
+export function hydrateStoreFromRaw(remoteRaw) {
+  const merged = syncScopeFromBackup(remoteRaw)
+  hydrateStoreFromPlan({ merged })
+}
+
+// 单向下载必须逐项确认写入结果。错题集在 restoreAllDetailed 中优先写入；
+// 若仍失败，不再向用户误报“下载成功”，而是直接暴露存储空间/浏览器阻止写入原因。
+export function restoreCloudSnapshot(remoteRaw) {
+  const remote = syncScopeFromBackup(remoteRaw)
+  const report = restoreAllDetailed(remoteRaw)
+  const failed = Array.isArray(report.failed) ? report.failed : []
+  if (Object.prototype.hasOwnProperty.call(remote, 'xc_wqs') && failed.includes('xc_wqs')) {
+    throw new Error('云端错题集未写入本机：请先导出本机备份并清理浏览器站点存储空间后重试')
+  }
+  if (failed.length) {
+    throw new Error('云端下载不完整，未写入：' + failed.join('、') + '。请先导出备份并清理站点存储空间后重试')
+  }
+  hydrateStoreFromRaw(remoteRaw)
+  return report
 }
 
 export async function runCloudSync() {
@@ -464,7 +499,7 @@ export async function runCloudSync() {
   const state = readSyncState()
   const remoteMeta = cloudEnvelopeMeta(remoteRaw)
   const preferRemote = !!remoteRaw && remoteMeta.t > state.remoteT && !syncOverview().dirty
-  const plan = applyLocalMerge(collectAll(), remoteRaw, state.base, { preferRemote })
+  const plan = applyLocalMerge(collectCloudData(), remoteRaw, state.base, { preferRemote })
   hydrateStoreFromPlan(plan)
   let putTs = remoteRaw && remoteRaw.t ? Number(remoteRaw.t) : 0
   if (!plan.sameAsRemote) {
@@ -500,7 +535,7 @@ export async function runCloudUpload(options = {}) {
   let remoteRaw = null
   if (getRes) remoteRaw = await getRes.json()
   const state = readSyncState()
-  const local = collectAll()
+  const local = collectCloudData()
   const sameAsLocal = remoteRaw ? syncDataHash(remoteRaw) === syncDataHash(local) : false
   const meta = cloudEnvelopeMeta(remoteRaw)
   if (remoteRaw && !options.force && !sameAsLocal && (state.kind !== 'wd' || meta.t > state.remoteT)) {
@@ -534,14 +569,14 @@ export async function runCloudDownload(options = {}) {
   const remoteRaw = await getRes.json()
   if (!remoteRaw || (!remoteRaw.data && !remoteRaw.app)) throw new Error('云端同步文件格式不对')
   const state = readSyncState()
-  const local = collectAll()
+  const local = collectCloudData()
   const remoteHash = syncDataHash(remoteRaw)
   const localHash = syncDataHash(local)
   const meta = cloudEnvelopeMeta(remoteRaw)
   if (localHash !== remoteHash && !options.force && (state.kind !== 'wd' || (state.baseHash && localHash !== state.baseHash))) {
     return { ok: false, needsConfirm: true, direction: 'download', remoteT: meta.t, remoteDevice: meta.deviceLabel }
   }
-  const n = restoreAll(remoteRaw)
+  const restored = restoreCloudSnapshot(remoteRaw)
   saveSyncState({
     ...state,
     last: Date.now(),
@@ -553,5 +588,5 @@ export async function runCloudDownload(options = {}) {
     baseHash: remoteHash,
     lastStat: '已下载云端版本 ' + new Date(meta.t || Date.now()).toLocaleString()
   })
-  return { ok: true, changed: n > 0, ts: meta.t || Date.now(), direction: 'download', remoteT: meta.t, remoteDevice: meta.deviceLabel }
+  return { ok: true, changed: restored.n > 0, ts: meta.t || Date.now(), direction: 'download', remoteT: meta.t, remoteDevice: meta.deviceLabel, restored: restored.restored, failed: restored.failed }
 }

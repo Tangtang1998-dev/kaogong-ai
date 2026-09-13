@@ -44,7 +44,15 @@ export function safeSet(key, val) {
     // QuotaExceeded 降级：msgs 先裁到最近 30 条再试一次
     try {
       if (key === KEYS.MSGS && Array.isArray(val)) {
-        localStorage.setItem(key, JSON.stringify(val.slice(-30).map((m) => ({ ...m, _slim: true }))))
+        const slim = val.map((m) => {
+          if (!m || typeof m !== 'object') return m
+          const x = { ...m }
+          if (Array.isArray(x.imgs)) x.imgs = []
+          if (x.img && String(x.img).startsWith('data:')) x.img = ''
+          if (Array.isArray(x.content)) x.content = x.content.map((c) => c && c.type === 'image_url' ? { ...c, image_url: { url: '' } } : c)
+          return x
+        })
+        localStorage.setItem(key, JSON.stringify(slim))
         return true
       }
     } catch (e) {}

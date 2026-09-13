@@ -158,6 +158,12 @@ export function normalizeCoachState(rc = {}, fingerprint = '') {
   }
 }
 
+export function isCoachPlanReusable(rc = {}, fingerprint = '', hasApiKey = false) {
+  const src = rc && typeof rc === 'object' ? rc : {}
+  const mode = src.mode === 'ai' ? 'ai' : 'taxonomy'
+  return Array.isArray(src.steps) && src.steps.length >= 3 && src.fingerprint === fingerprint && (mode === 'ai' || !hasApiKey)
+}
+
 export function parseCoachPlan(reply) {
   const obj = parseJson(reply)
   const rawSteps = obj && Array.isArray(obj.steps) ? obj.steps : []
@@ -269,6 +275,7 @@ export default {
   buildCoachContext,
   fingerprintCoachContext,
   normalizeCoachState,
+  isCoachPlanReusable,
   parseCoachPlan,
   buildCoachFallback,
   buildOneClickDraft,

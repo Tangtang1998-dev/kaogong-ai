@@ -16,6 +16,7 @@ const D = () => ({
   sys: '',
   kb: true,
   strm: true,
+  webSearchOn: false,
   tts: true,
   ttsOn: false, // 自动朗读默认关（省 token：智谱真人 TTS 按次收费；需要时点输入栏 🔊 或设置开启）
   ttsScene: 'natural',

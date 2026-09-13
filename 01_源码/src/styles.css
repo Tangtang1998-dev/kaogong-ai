@@ -2922,6 +2922,8 @@ body[data-theme='light'] .app { background: rgba(247, 250, 254, 0.92); backdrop-
 .cq-btn { flex:0 0 auto; padding:3px 8px; border:1px solid var(--glass-border); border-radius:999px; background:var(--surface); color:var(--text2); font:inherit; font-size:calc(11px * var(--ui-fs-scale, 1)); cursor:pointer; transition:transform .14s, border-color .14s, color .14s, background .14s; }
 .cq-btn:hover { transform:translateY(-1px); border-color:var(--glass-border-hi); color:var(--accent); background:var(--accent2); }
 .cq-btn:active { transform:scale(.97); }
+.cq-btn.on { border-color:var(--accent); color:var(--accent); background:var(--accent2); font-weight:700; }
+.cq-btn:disabled { opacity:.55; cursor:wait; transform:none; }
 .e-dock textarea {
   flex: 1;
   padding: 10px 12px;

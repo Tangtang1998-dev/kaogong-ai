@@ -27,6 +27,9 @@ const {
   linkShow,
   linkUrl,
   openLinkSmart,
+  webSearchOn,
+  webSearchBusy,
+  toggleWebSearch,
   recogOn,
   nextTick,
   openExam,
@@ -127,6 +130,7 @@ onBeforeUnmount(() => clearTimeout(toolsBlurTimer))
             <div class="composer-quickbar" aria-label="常用输入功能">
               <span>常用</span>
               <button v-for="c in COMMANDS.slice(0, 4)" :key="c.id" class="cq-btn" @click="pickCommand(c)">{{ c.ic }} {{ c.label }}</button>
+              <button class="cq-btn cq-web" :class="{ on: webSearchOn }" :disabled="webSearchBusy" :aria-pressed="webSearchOn" :title="webSearchOn ? '联网搜索已开启；点击关闭' : '开启后发送问题前会先搜索公开网页并附来源'" @click="toggleWebSearch()">🌐 {{ webSearchBusy ? '检索中…' : webSearchOn ? '联网开' : '联网搜索' }}</button>
             </div>
             <textarea
               ref="sourceRef"
@@ -156,6 +160,7 @@ onBeforeUnmount(() => clearTimeout(toolsBlurTimer))
               <input type="file" accept="image/*" multiple style="display: none" @change="pickImage" />
             </label>
             <button class="ib-btn" :class="{ on: linkShow }" title="自动读取剪贴板链接，回车即可把图片加入输入区" @click="openLinkSmart()">🔗 图片链接</button>
+            <button class="ib-btn" :class="{ on: webSearchOn }" :disabled="webSearchBusy" :aria-pressed="webSearchOn" :title="webSearchOn ? '联网搜索已开启；回答会附公开来源' : '开启后回答前先联网检索公开网页'" @click="toggleWebSearch()">🌐 {{ webSearchBusy ? '检索中…' : webSearchOn ? '联网开' : '联网搜索' }}</button>
           </div>
           <div class="dock-sec">
             <span class="dock-sec-t">语音</span>

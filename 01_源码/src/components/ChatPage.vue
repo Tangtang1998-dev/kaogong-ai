@@ -67,6 +67,7 @@ import { cleanSpeechText } from '../utils/tts/clean'
 import { MODE_NAMES } from '../kb'
 import { collectChat } from '../utils/chat'
 import { showToast } from '../utils/toast'
+import { searchWeb, buildWebSearchContext } from '../utils/webSearch'
 import { gateNow } from '../utils/abilityGate' // 35号批次4-B(2/2)：锚点自测解锁门槛
 import { navOpen, navBack } from '../utils/nav'
 import { buildReview } from '../utils/review'
@@ -109,7 +110,9 @@ const text = ref(''),
   linkUrl = ref(''),
   linkBusy = ref(false),
   linkErr = ref(''),
-  recogOn = ref(false)
+  recogOn = ref(false),
+  webSearchOn = ref(store.cfg.webSearchOn === true),
+  webSearchBusy = ref(false)
 const quickMode = ref(localStorage.getItem('xc_quick_mode') === '1') // 🧠深度(思考模型,准) / ⚡快答(快模型,快)
 function toggleQuickMode() {
   quickMode.value = !quickMode.value
@@ -119,6 +122,18 @@ function toggleQuickMode() {
       ? '⚡ 快答已开启：用「对话快模型」秒回（适合简单/熟练题；难题建议切回深度）'
       : '🧠 深度解析已开启：用思考模型更准（适合难题/文字截图题；较慢）',
     'info'
+  )
+}
+function toggleWebSearch() {
+  if (webSearchBusy.value) return
+  webSearchOn.value = !webSearchOn.value
+  store.cfg.webSearchOn = webSearchOn.value
+  saveCfg()
+  showToast(
+    webSearchOn.value
+      ? '🌐 联网搜索已开启：发送问题前会先检索公开网页并向模型注入来源；会增加少量回答 token'
+      : '🌐 联网搜索已关闭：恢复为模型离线知识作答',
+    webSearchOn.value ? 'success' : 'info'
   )
 }
 // ===== 提问助手（v3.8.76）：输入即分析板块/题型/意图/缺失，并在输入区轻量引导 =====
@@ -762,6 +777,40 @@ let _vtType = '' // v3.8.192 命中 canonical 题型则非空
     const _rb = recallBlock({ wqs: store.wqs, srs: loadSrs(), query: curTxt, plate6: _pp6r })
     if (_rb) sys += _rb
   } catch (e) {}
+  // ===== 联网搜索：按需检索公开网页，把带 URL 的证据注入本轮系统提示 =====
+  let _webNote = ''
+  if (webSearchOn.value) {
+    const plain = (m) => {
+      if (!m) return ''
+      const c = m.content
+      return String(typeof c === 'string' ? c : (c && (c.text || c.content)) || '').trim()
+    }
+    let searchQuery = String(curFigRead || curTxt || '').trim()
+    if (searchQuery.length < 6 || /^(继续|展开|详细|为什么|然后呢|那呢|再讲)/.test(searchQuery)) {
+      const prior = [...store.msgs].slice(0, -1).reverse().find((m) => m && m.role === 'user')
+      const priorText = plain(prior)
+      if (priorText) searchQuery = (priorText + ' ' + searchQuery).trim()
+    }
+    searchQuery = searchQuery.slice(0, 220)
+    if (searchQuery) {
+      webSearchBusy.value = true
+      try {
+        const sr = await searchWeb(searchQuery, { limit: 5, signal: abortCtrl && abortCtrl.signal })
+        sys += buildWebSearchContext(searchQuery, sr)
+        if (sr.ok && sr.items.length) {
+          _webNote = '\n\n---\n🌐 **联网检索来源**\n' + sr.items.map((it, i) => `${i + 1}. [${it.title}](${it.url})`).join('\n')
+          showToast('🌐 已检索到 ' + sr.items.length + ' 条公开资料，正在结合证据回答', 'info')
+        } else {
+          showToast('🌐 本次未检索到可用公开资料，将如实说明并继续回答', 'warning')
+        }
+      } catch (e) {
+        sys += buildWebSearchContext(searchQuery, { ok: false, items: [] })
+        showToast('🌐 联网搜索失败：' + ((e && e.message) || e), 'warning')
+      } finally {
+        webSearchBusy.value = false
+      }
+    }
+  }
   resetAutoSpeech(curTxt)
   _autoSpeechPinCache = true
   live.value = { text: '', think: '', thinkOpen: false }
@@ -801,7 +850,7 @@ let _vtType = '' // v3.8.192 命中 canonical 题型则非空
         if (_vr.warnings.some((x) => x.includes('选非'))) showToast('⚠ 自查提示：' + _vr.warnings[0], 'warn')
       }
     } catch (e) {}
-    const _withSrc = finalContent + (_hitNote ? '\n\n' + _hitNote : '')
+    const _withSrc = finalContent + (_hitNote ? '\n\n' + _hitNote : '') + _webNote
 addMsg({ role: 'assistant', content: _withSrc, _vt: _vtType })
     const lastAiForSpeech = store.msgs[store.msgs.length - 1]
     // 图形理解增强（可选·独立模型）：仅当图片含图形/表格时才自动复刻（避免对文字截图/纯文字题浪费 token）；其余情况用户可手动点「🖼 图形增强」
@@ -2472,6 +2521,7 @@ defineEmits(['export-review'])
 const fpctx = reactive({ ref, nextTick, computed, onMounted, onUnmounted, watch, defineAsyncComponent, renderMd, USAGE_GUIDE, parseQuiz, parseQuizBatch, extractChoices, looksLikeQuiz, isQuizAsk, downloadMdScreenshot, md, _mdCache, STEP_PROMPT, isStepText, stepTagText, sameTypeAgain, mdC, mdCached, _rafPending, scrollThrottled, store, saveMsgs, saveWqs, saveCfg, saveNotes, addWrong, recordPetChat, markPetChatWrong, getTodaysPetChat, evOn, evOff, activeCfg, supportsVision, buildSys, chatStream, chatOnce, detectBanKuai, buildTaskSys, PLATE_MODE, analyzeFigImage, readQuestionFromImage, figCfg, buildChatHistory, ensureImgNotesForHistory, lastImgTopics, probe, detectAskDir, taskShape, nextContext, buildScenarioPrompt, batchScenarioPrompt, sortScenarioPrompt, typeFirstPrompt, honestyPrompt, retrieveDetailed, normalizePlate, verifyReply, wrongExplainPrompt, detectMode, askModeSys, MODE_MAP, _lastAskCtx, analyzeAsk, INTENT_SYS, ANCHOR_PROTOCOL, DEPTH_SYS, hasStepHeadings, resolveVariant, variantStepPrompt, speak, stopSpeak, speaking, speakPaused, ttsStatus, startRecog, recogActive, speakReadyText, MODE_NAMES, collectChat, showToast, gateNow, navOpen, navBack, buildReview, ExamPanel, petAddPoints, SolidTrain, DataTrain, AskWizard, toolsCollapsed, isNarrow, onToolsResize, toggleTools, collapseTools, guideShow, guideOpen, guideQaOpen, toggleGuideSec, toggleGuideQa, linkShow, linkUrl, linkBusy, linkErr, openLinkSmart, recogOn, text, quickMode, toggleQuickMode, ask, askShow, _askT, reAnalyze, wzOpen, wzSel, wizardModeLabel, wzConfirm, wzCancel, setDepth, DEPTH_LABEL, closeAssist, openAssist, forceSend, live, msgsBox, atBottom, sumMsgsScroll, backToLatest, blPos, blStyle, clampBl, onBlDown, buildQuizFromMsg, hydrateQuizCards, addMsg, quizBatchCount, quizBatchIdx, quizBatchHasPrev, quizBatchHasNext, quizBatchGo, lastAskText, lastAskAt, scroll, pickImage, addImageUrl, rmImg, abortCtrl, stopGenerate, ADD_TODAY_WRONG_CMD, isAddTodayWrongCmd, send, runChat, shouldFigEnhance, drawTutuAnno, figView, figZoom, closeFigZoom, figSave, downloadBlob, maybeFigEnhance, findPrevUserImg, prevHasImg, retryFigEnhance, retryLast, resendMsg, saveWrong, pickQuiz, quizAiCheck, ensureQuizExplain, saveQuizWrong, addTodaysWrongToWq, quizFull, quizFullShow, quizFullClose, quizFullDeep, quizPlate, quizHasSvg, quizWrongAdd, quizWrongIgnore, capQuizShot, quizExplainNow, quizScrollTo, textOf, quizDeep, bkShow, examShow, examPanelSrc, examOffline, examPaperData, openExam, closeExam, openAnchor, openPaperData, openSolid, closeSolid, openDataTrain, closeDataTrain, onNavBack, solidShow, dtShow, bkPick, bkOrigin, BK_OPTIONS, compressImage, confirmSaveWrong, getLastUserText, getLastQuizText, variantMenu, quizFullText, doVariant, showVariantExplain, focusInput, trainPlate, plates, modeHint, inputPh, dStat, motos, motto, collectStat, QUIZ_ANALYSIS_MARK, quizHideAnalysis, isQuizStream, train, findWeakPlate, trainWeak, autoSpeak, toggleTts, speakMsgTxt, toggleSpeak, speakingMsgIndex, speechPreparing, toggleMsgPause, cycleMsgSpeed, stopMsgSpeak, replayMessageSpeech, toggleMic, modeOpen, MODE_GROUPS, modeIcon, modeName, setMode, quickCards, onSolidQuestion, recentQs, pushRecent, useRecent, draftTimer, restoreDraft, toggleFb, followUp, collectMsg, expanded, toggleExpand, fixPlate, applyPlate, isLong, askQuick, imgView, viewImg, closeImg, svgBox, openSvgBox, closeSvgBox, saveSvgBox, onMsgFigClick, downloadImg, onAsk, hlIdx, hlTimer, onGotoMsg, selBar, selTimer, updateSelBar, onDocMouseUp, onSelChange, hideSelBar, selMsg, copySelected, selectAllMsg, copyFullMsg, fillPendingAsk, onOpenExam, onOpenPaperData, onModePickOutside, onOpenPaper, copyRaw, flashBtn, copyCode, copyMsg, onDocClick, capMsg })
 Object.assign(fpctx, { YanTrain, openYanTrain, closeYanTrain, yanShow })
 Object.assign(fpctx, { backLayerOpen })
+Object.assign(fpctx, { webSearchOn, webSearchBusy, toggleWebSearch })
 
 </script>
 <template>

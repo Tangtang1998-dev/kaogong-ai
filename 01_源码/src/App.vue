@@ -25,7 +25,7 @@ import { getErrorLog, clearErrorLog } from './utils/errorLog'
 import { APP_VERSION } from './version'
 import { startStudyTrack, stopStudyTrack } from './utils/study'
 import { nav, navBack, syncNavFromHistory } from './utils/nav'
-import { installPlusBackBehavior, installNativeBackBehavior, onHardwareBack, nativeToast, isNativeHost } from './utils/platform' // ★安卓返回键/宿主桥
+import { installPlusBackBehavior, installNativeBackBehavior, onHardwareBack, nativeToast, isNativeHost, getClipboard } from './utils/platform' // ★安卓返回键/宿主桥
 import { runCloudSync, runCloudUpload, runCloudDownload, readSyncState, saveSyncState, syncOverview } from './utils/cloudSync'
 import { runGitHubSync, runGitHubUpload, runGitHubDownload } from './utils/githubSync'
 import { runGiteeSync, runGiteeUpload, runGiteeDownload } from './utils/giteeSync'
@@ -2064,7 +2064,8 @@ function flushSyncToken(kind) {
 }
 async function pasteSyncToken(kind) {
   try {
-    const text = await navigator.clipboard.readText()
+    const text = await getClipboard()
+    if (!text) throw new Error('empty')
     setSyncToken(kind, String(text || '').trim())
     showToast('✅ 已从剪贴板粘贴 Token', 'success')
   } catch (e) {

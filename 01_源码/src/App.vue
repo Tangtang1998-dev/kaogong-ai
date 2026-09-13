@@ -2049,6 +2049,28 @@ function ensureSyncTimer() {
     }
   }, 45000)
 }
+function setSyncToken(kind, value) {
+  const key = kind === 'gh' ? 'github' : 'gitee'
+  if (!store.cfg[key]) store.cfg[key] = { token: '', repo: '' }
+  store.cfg[key].token = String(value || '')
+  saveCfg()
+}
+function flushSyncToken(kind) {
+  const key = kind === 'gh' ? 'github' : 'gitee'
+  try {
+    const el = document.querySelector('[data-sync-token="' + kind + '"]')
+    if (el && String(el.value || '') !== String((store.cfg[key] || {}).token || '')) setSyncToken(kind, el.value)
+  } catch (e) {}
+}
+async function pasteSyncToken(kind) {
+  try {
+    const text = await navigator.clipboard.readText()
+    setSyncToken(kind, String(text || '').trim())
+    showToast('✅ 已从剪贴板粘贴 Token', 'success')
+  } catch (e) {
+    showToast('无法自动读取剪贴板，请长按输入框后粘贴', 'warn')
+  }
+}
 async function runWdAuto(manual) {
   if (wdBusy.value || ghBusy.value || geBusy.value) return { ok: false }
   wdBusy.value = true
@@ -2110,6 +2132,7 @@ function ghToggleAuto() {
   }
 }
 async function runGhSync(manual) {
+  flushSyncToken('gh')
   if (wdBusy.value || ghBusy.value || geBusy.value) return { ok: false }
   ghBusy.value = true
   ghStat.value = manual ? 'GitHub 智能同步中…' : 'GitHub 自动互通中…'
@@ -2154,6 +2177,7 @@ function geToggleAuto() {
   }
 }
 async function runGeSync(manual) {
+  flushSyncToken('ge')
   if (wdBusy.value || ghBusy.value || geBusy.value) return { ok: false }
   geBusy.value = true
   geStat.value = manual ? 'Gitee 智能同步中…' : 'Gitee 自动互通中…'
@@ -2199,6 +2223,7 @@ function downloadConfirmText(r) {
   return '本机有未上传改动，下载云端会覆盖这些改动。\n\n云端版本：' + fmtSyncTime(r.remoteT) + '（' + (r.remoteDevice || '其他设备') + '）。\n\n若想两边都保留，请取消后使用“智能合并”。确定下载云端吗？'
 }
 async function syncUpload(kind, force = false) {
+  if (kind === 'gh' || kind === 'ge') flushSyncToken(kind)
   if (wdBusy.value || ghBusy.value || geBusy.value) return { ok: false }
   setSyncProviderBusy(kind, true)
   setSyncProviderStat(kind, '正在检查云端并上传本机版本…')
@@ -2228,6 +2253,7 @@ async function syncUpload(kind, force = false) {
   }
 }
 async function syncDownload(kind, force = false) {
+  if (kind === 'gh' || kind === 'ge') flushSyncToken(kind)
   if (wdBusy.value || ghBusy.value || geBusy.value) return { ok: false }
   setSyncProviderBusy(kind, true)
   setSyncProviderStat(kind, '正在读取云端版本…')
@@ -3505,7 +3531,10 @@ onUnmounted(() => {
         <div class="sec-desc" style="margin-top:4px">Gitee 是开源中国提供的国内代码托管平台，网页端允许跨域直连。每位用户填自己的 Gitee 私人令牌，系统会在“该令牌对应账户”下自动创建私人仓库 <b>xingce-ai-cloud-sync</b>；令牌只保存在本机，不会写入同步数据，也不需要 GitHub。</div>
         <div class="fld">
           <label>Gitee 私人令牌（Gitee 右上角头像 → 设置 → 安全设置 → 私人令牌 → 生成新令牌，勾选 projects 读写权限即可）</label>
-          <input v-model="store.cfg.gitee.token" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="粘贴 Gitee 私人令牌" @input="saveCfg()" />
+          <div style="display:flex;gap:6px">
+            <input :value="store.cfg.gitee.token" data-sync-token="ge" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="粘贴 Gitee 私人令牌" style="flex:1;min-width:0" @input="setSyncToken('ge', $event.target.value)" @change="setSyncToken('ge', $event.target.value)" />
+            <button type="button" class="btn btn-gh" title="从系统剪贴板读取 Gitee Token" @click="pasteSyncToken('ge')">📋 粘贴</button>
+          </div>
         </div>
         <div class="fld">
           <label>同步仓库（留空 = 自动创建私人仓库 xingce-ai-cloud-sync）</label>
@@ -3526,7 +3555,10 @@ onUnmounted(() => {
         <div class="sec-desc" style="margin-top:4px">每位用户填自己的 GitHub Token，系统会把数据存到“该 Token 对应账户”下自动创建的私人仓库，互不共用；代码没有写死任何特定账户。Token 与仓库名只保存在各设备本机，不会写入同步数据。</div>
         <div class="fld">
           <label>GitHub Token（Settings → Developer settings → Personal access tokens，勾选 repo 权限）</label>
-          <input v-model="store.cfg.github.token" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="ghp_… 或 github_pat_…" @input="saveCfg()" />
+          <div style="display:flex;gap:6px">
+            <input :value="store.cfg.github.token" data-sync-token="gh" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="ghp_… 或 github_pat_…" style="flex:1;min-width:0" @input="setSyncToken('gh', $event.target.value)" @change="setSyncToken('gh', $event.target.value)" />
+            <button type="button" class="btn btn-gh" title="从系统剪贴板读取 GitHub Token" @click="pasteSyncToken('gh')">📋 粘贴</button>
+          </div>
         </div>
         <div class="fld">
           <label>同步仓库（留空 = 在你自己的 GitHub 下自动创建私人仓库 xingce-ai-cloud-sync）</label>

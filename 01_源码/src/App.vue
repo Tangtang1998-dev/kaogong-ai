@@ -3505,7 +3505,7 @@ onUnmounted(() => {
         <div class="sec-desc" style="margin-top:4px">Gitee 是开源中国提供的国内代码托管平台，网页端允许跨域直连。每位用户填自己的 Gitee 私人令牌，系统会在“该令牌对应账户”下自动创建私人仓库 <b>xingce-ai-cloud-sync</b>；令牌只保存在本机，不会写入同步数据，也不需要 GitHub。</div>
         <div class="fld">
           <label>Gitee 私人令牌（Gitee 右上角头像 → 设置 → 安全设置 → 私人令牌 → 生成新令牌，勾选 projects 读写权限即可）</label>
-          <input v-model="store.cfg.gitee.token" type="password" autocomplete="new-password" placeholder="粘贴 Gitee 私人令牌" @change="saveCfg()" />
+          <input v-model="store.cfg.gitee.token" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="粘贴 Gitee 私人令牌" @input="saveCfg()" />
         </div>
         <div class="fld">
           <label>同步仓库（留空 = 自动创建私人仓库 xingce-ai-cloud-sync）</label>
@@ -3526,7 +3526,7 @@ onUnmounted(() => {
         <div class="sec-desc" style="margin-top:4px">每位用户填自己的 GitHub Token，系统会把数据存到“该 Token 对应账户”下自动创建的私人仓库，互不共用；代码没有写死任何特定账户。Token 与仓库名只保存在各设备本机，不会写入同步数据。</div>
         <div class="fld">
           <label>GitHub Token（Settings → Developer settings → Personal access tokens，勾选 repo 权限）</label>
-          <input v-model="store.cfg.github.token" type="password" autocomplete="new-password" placeholder="ghp_… 或 github_pat_…" @change="saveCfg()" />
+          <input v-model="store.cfg.github.token" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="ghp_… 或 github_pat_…" @input="saveCfg()" />
         </div>
         <div class="fld">
           <label>同步仓库（留空 = 在你自己的 GitHub 下自动创建私人仓库 xingce-ai-cloud-sync）</label>

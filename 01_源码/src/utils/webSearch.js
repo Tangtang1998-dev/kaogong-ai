@@ -34,6 +34,10 @@ function wantsHoliday(query) {
   return /(今天|今日|明天|昨日|昨天|现在).*(节日|节假日|放假|假期)|什么是?(节日|节假日)|什么节日/.test(q)
 }
 
+function wantsMeeting(query) {
+  return /会议|大会|峰会|论坛|全会|常务会/.test(String(query || ''))
+}
+
 function holidayDateFromQuery(query) {
   const q = String(query || '')
   const m = q.match(/(20\d{2})年(\d{1,2})月(\d{1,2})日/)
@@ -157,6 +161,37 @@ async function searchHoliday(query, signal) {
   return [{ title, snippet, url: 'https://timor.tech/api/holiday/info/' + date, source: '节假日 API' }]
 }
 
+export async function searchGovMeetings(query, signal, limit = 5) {
+  if (!wantsMeeting(query)) return []
+  const q = /全会|峰会|论坛|常务会|代表大会/.test(query) ? cleanText(query, 80) : '会议'
+  const url = 'https://sousuo.www.gov.cn/search-gov/data?t=zhengcelibrary&q=' + encodeURIComponent(q) + '&timetype=timeqb&sort=time&sortType=1&searchfield=title&p=1&n=' + Math.max(10, limit)
+  const data = await fetchJson(url, signal, 8000)
+  const cat = data && data.searchVO && data.searchVO.catMap ? data.searchVO.catMap : {}
+  const rows = []
+  for (const key of ['otherfile', 'gongwen', 'bumenfile']) {
+    const list = cat[key] && Array.isArray(cat[key].listVO) ? cat[key].listVO : []
+    for (const x of list) rows.push(x)
+  }
+  const seen = new Set()
+  const items = []
+  for (const row of rows) {
+    const link = String(row.url || row.link || '').trim()
+    const title = cleanText(row.title, 180)
+    if (!link || !title || seen.has(link)) continue
+    seen.add(link)
+    items.push({ title, snippet: `${cleanText(row.pubtimeStr, 20)} ${cleanText(row.summary, 420)}`.trim(), url: link, source: '中国政府网' })
+    if (items.length >= limit) break
+  }
+  if (!items.length) return []
+  const date = holidayDateFromQuery(query)
+  const hitToday = items.find((x) => String(x.snippet).includes(date.replace(/-/g, '.')) || String(x.snippet).includes(date))
+  const top = hitToday || items[0]
+  const answer = hitToday
+    ? `检索到 ${date} 相关的中国政府网会议信息：${top.title}。`
+    : `截至当前日期，中国政府网可检索到的会议信息中没有明确标注 ${date} 当天召开的重大会议；最近一条相关会议信息为 ${top.snippet.slice(0, 120)}。`
+  return [{ title: answer, snippet: answer, url: top.url, source: '中国政府网' }, ...items.filter((x) => x.url !== top.url)]
+}
+
 export function clearWebSearchCache() {
   cache.clear()
 }
@@ -171,6 +206,7 @@ export async function searchWeb(query, opts = {}) {
   if (hit && Date.now() - hit.at < CACHE_TTL) return { ...hit.value, cached: true }
   const settled = await Promise.allSettled([
     searchHoliday(q, opts.signal),
+    searchGovMeetings(q, opts.signal, limit),
     searchWikipedia(datedQ, opts.signal, limit),
     searchDuckDuckGo(datedQ, opts.signal, limit)
   ])
@@ -181,10 +217,18 @@ export async function searchWeb(query, opts = {}) {
     const shortDate = date.slice(5).replace('-', '月') + '日'
     items = [groups[0][0], ...items.filter((it) => it.source !== '节假日 API' && (String(it.title + it.snippet).includes(date) || String(it.title + it.snippet).includes(shortDate)))].slice(0, limit)
   }
+  let directAnswer = wantsHoliday(q) && items[0] && items[0].source === '节假日 API' ? items[0].snippet : ''
+  let kind = directAnswer ? 'holiday' : 'web'
+  if (wantsMeeting(q) && Array.isArray(groups[1]) && groups[1].length) {
+    const gov = groups[1][0]
+    items = [gov, ...items.filter((it) => it.url !== gov.url)].slice(0, limit)
+    directAnswer = gov.snippet
+    kind = 'meeting'
+  }
   const errors = settled.filter((x) => x.status === 'rejected').map((x) => cleanText(x.reason && x.reason.message, 120))
   const value = items.length
-    ? { ok: true, query: q, datedQuery: datedQ, items, provider: '节假日 API / DuckDuckGo / Wikipedia', error: '', cached: false, kind: wantsHoliday(q) && items[0] && items[0].source === '节假日 API' ? 'holiday' : 'web', directAnswer: wantsHoliday(q) && items[0] && items[0].source === '节假日 API' ? items[0].snippet : '' }
-    : { ok: false, query: q, datedQuery: datedQ, items: [], provider: '节假日 API / DuckDuckGo / Wikipedia', error: errors.join('；') || '未检索到公开结果', cached: false }
+    ? { ok: true, query: q, datedQuery: datedQ, items, provider: '节假日 API / 中国政府网 / DuckDuckGo / Wikipedia', error: '', cached: false, kind, directAnswer }
+    : { ok: false, query: q, datedQuery: datedQ, items: [], provider: '节假日 API / 中国政府网 / DuckDuckGo / Wikipedia', error: errors.join('；') || '未检索到公开结果', cached: false }
   cache.set(key, { at: Date.now(), value })
   return value
 }

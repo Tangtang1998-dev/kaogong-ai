@@ -110,6 +110,11 @@ export function renderMd(t) {
     ADD_TAGS: ['annotation', 'semantics', 'math', 'mrow', 'mi', 'mo', 'mn', 'mfrac', 'msqrt', 'msup', 'msub', 'mtext', 'mspace', 'munder', 'mover', 'munderover', 'merror', 'mpadded', 'mphantom', 'mfenced'],
     ALLOW_DATA_ATTR: true
     })
+  // 联网检索来源链接：统一新窗口打开，避免覆盖当前对话上下文。
+  html = html.replace(/<a\s+href=("|')(https?:\/\/[^"']+)\1([^>]*)>/gi, (m, q, href, rest) => {
+    const attrs = String(rest || '').replace(/\s(target|rel)=("[^"]*"|'[^']*')/gi, '')
+    return `<a href="${href}"${attrs} target="_blank" rel="noopener noreferrer">`
+  })
   // 关键内容自动着色：回复中的「正确答案 / 秒杀 / 陷阱 / 复盘」等强调句染强调色（其余正文保持黑/白），突出每次回复的关键信息
   html = html.replace(/<strong>([^<]*?(?:【正确答案】|正确答案|秒杀|陷阱|复盘|易错点|要点|结论)[^<]*?)<\/strong>/g, '<span class="k-ans"><strong>$1</strong></span>')
   return html

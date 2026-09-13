@@ -44,4 +44,19 @@ describe('webSearch 联网检索增强', () => {
     expect(r.directAnswer).toContain('不是全国统一的法定节假日')
     expect(r.items[0].snippet).toContain('不是全国统一的法定节假日')
   })
+
+  it('重大会议问题查询中国政府网，并给出今天无明确会议记录的真实结果', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url) => {
+      const u = String(url)
+      if (u.includes('sousuo.www.gov.cn')) return { ok: true, json: async () => ({ searchVO: { catMap: { otherfile: { listVO: [{ title: '国务院常务会议解读', pubtimeStr: '2026.09.12', url: 'https://www.gov.cn/zhengce/test.htm', summary: '9月11日召开的国务院常务会议研究有关工作。' }] } } } }) }
+      if (u.includes('list=search')) return { ok: true, json: async () => ({ query: { search: [] } }) }
+      return { ok: true, json: async () => ({}) }
+    }))
+    const r = await searchWeb('今天有哪些重大会议', { limit: 5 })
+    expect(r.ok).toBe(true)
+    expect(r.kind).toBe('meeting')
+    expect(r.items[0].source).toBe('中国政府网')
+    expect(r.directAnswer).toContain('没有明确标注')
+    expect(r.items[0].url).toContain('gov.cn')
+  })
 })

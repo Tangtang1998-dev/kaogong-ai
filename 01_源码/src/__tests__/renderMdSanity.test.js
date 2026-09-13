@@ -23,6 +23,12 @@ describe('renderMd smoke', () => {
     expect(html).toContain('<strong>考点：</strong>')
     expect(html).toContain('<table>')
   })
+  it('联网来源链接在新窗口打开', () => {
+    const html = renderMd('[中国政府网](https://www.gov.cn/zhengce/test.htm)')
+    expect(html).toContain('href="https://www.gov.cn/zhengce/test.htm"')
+    expect(html).toContain('target="_blank"')
+    expect(html).toContain('rel="noopener noreferrer"')
+  })
 })
 
 describe('GFM 表格渲染', () => {

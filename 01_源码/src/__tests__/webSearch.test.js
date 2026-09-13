@@ -26,7 +26,22 @@ describe('webSearch 联网检索增强', () => {
     const r = await searchWeb('完全无结果测试', { limit: 3 })
     expect(r.ok).toBe(false)
     const ctx = buildWebSearchContext('完全无结果测试', r)
-    expect(ctx).toContain('无法联网核实')
+    expect(ctx).toContain('本次检索未找到可靠结果')
     expect(ctx).toContain('不得编造来源')
+  })
+
+  it('“今天是什么节日”自动锚定当天日期并查询节假日 API', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url) => {
+      const u = String(url)
+      if (u.includes('timor.tech')) return { ok: true, json: async () => ({ code: 0, type: { type: 1, name: '周日', week: 7 }, holiday: null }) }
+      if (u.includes('list=search')) return { ok: true, json: async () => ({ query: { search: [] } }) }
+      return { ok: true, json: async () => ({}) }
+    }))
+    const r = await searchWeb('今天是什么节日', { limit: 5 })
+    expect(r.ok).toBe(true)
+    expect(r.datedQuery).toMatch(/20\d{2}-\d{2}-\d{2}/)
+    expect(r.items[0].source).toBe('节假日 API')
+    expect(r.directAnswer).toContain('不是全国统一的法定节假日')
+    expect(r.items[0].snippet).toContain('不是全国统一的法定节假日')
   })
 })

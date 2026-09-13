@@ -779,6 +779,7 @@ let _vtType = '' // v3.8.192 命中 canonical 题型则非空
   } catch (e) {}
   // ===== 联网搜索：按需检索公开网页，把带 URL 的证据注入本轮系统提示 =====
   let _webNote = ''
+  let _webDirect = ''
   if (webSearchOn.value) {
     const plain = (m) => {
       if (!m) return ''
@@ -798,6 +799,7 @@ let _vtType = '' // v3.8.192 命中 canonical 题型则非空
         const sr = await searchWeb(searchQuery, { limit: 5, signal: abortCtrl && abortCtrl.signal })
         sys += buildWebSearchContext(searchQuery, sr)
         if (sr.ok && sr.items.length) {
+          _webDirect = String(sr.directAnswer || '')
           _webNote = '\n\n---\n🌐 **联网检索来源**\n' + sr.items.map((it, i) => `${i + 1}. [${it.title}](${it.url})`).join('\n')
           showToast('🌐 已检索到 ' + sr.items.length + ' 条公开资料，正在结合证据回答', 'info')
         } else {
@@ -827,6 +829,10 @@ let _vtType = '' // v3.8.192 命中 canonical 题型则非空
       scrollThrottled()
     }, abortCtrl.signal)
     live.value = null
+    if (_webDirect) {
+      const direct = '🌐 **联网核验结果**\n\n' + _webDirect
+      full = /无法联网|不知道今天|没法确定|无法核实/.test(full) ? direct + '\n\n如需，我可以继续讲解相关行测常识考点。' : direct + '\n\n' + full
+    }
     // P-C3b 本地数值自查（v3.8.205）：模型附【验算】且题干有选项 → 程序求值复核，不符即正文追加提示
     try {
       const _pp6v = normalizePlate(String(_plate || detectBanKuai(curTxt) || ''))

@@ -38,28 +38,34 @@ describe('cloudSync 多端安全合并', () => {
     expect(JSON.parse(merged.xc_wqs)[0].question).toBe('手机新题面')
   })
 
-  it('学习数据与设置同步，仅排除纯本机 UI，密钥字段只上传占位', () => {
+  it('仅同步学习数据，设置、密钥与纯本机 UI 全部排除', () => {
     expect(shouldSyncKey('xc_msgs')).toBe(true)
-    expect(shouldSyncKey('xc_cfg')).toBe(true)
+    expect(shouldSyncKey('xc_cfg')).toBe(false)
     expect(shouldSyncKey('xc_chat_draft')).toBe(true)
     expect(shouldSyncKey('xc_recent_qs')).toBe(true)
     expect(shouldSyncKey('xc_auth')).toBe(false)
     expect(shouldSyncKey('xc_pet_pos_d')).toBe(false)
     const scoped = syncScopeFromBackup({ data: { xc_msgs: '[]', xc_cfg: '{}', xc_pet_pos_d: '{}', xc_pet: '{}' } })
-    expect(Object.keys(scoped).sort()).toEqual(['xc_cfg', 'xc_msgs', 'xc_pet'])
+    expect(Object.keys(scoped).sort()).toEqual(['xc_msgs', 'xc_pet'])
   })
 
-  it('设置随云端同步，但密钥只上传占位且恢复时保留本机真实密钥', () => {
+  it('设置与密钥不进入云同步，但本机现有配置保持不变', () => {
     testMem.clear()
     testMem.set('xc_cfg', JSON.stringify({ text: { key: 'sk-local-secret-12345678' }, webdav: { pass: 'local-pass' } }))
-    const env = makeCloudEnvelope({ xc_cfg: testMem.get('xc_cfg') })
-    const uploaded = JSON.parse(env.data.xc_cfg)
-    expect(uploaded.text.key).toBe('***')
-    expect(uploaded.webdav.pass).toBe('***')
-    restoreCloudSnapshot(env)
-    const restored = JSON.parse(testMem.get('xc_cfg'))
-    expect(restored.text.key).toBe('sk-local-secret-12345678')
-    expect(restored.webdav.pass).toBe('local-pass')
+    const env = makeCloudEnvelope({ xc_cfg: testMem.get('xc_cfg'), xc_msgs: '[]' })
+    expect(env.data.xc_cfg).toBeUndefined()
+    expect(JSON.parse(testMem.get('xc_cfg')).text.key).toBe('sk-local-secret-12345678')
+    expect(JSON.parse(testMem.get('xc_cfg')).webdav.pass).toBe('local-pass')
+  })
+
+  it('刚输入尚未失焦保存的 Key，自动同步前会先落盘且不会上传配置', () => {
+    testMem.clear()
+    store.cfg = { text: { key: 'sk-just-typed' }, rd: { key: 'sk-rd-typed' } }
+    const all = collectCloudData()
+    const env = makeCloudEnvelope(all.data)
+    expect(env.data.xc_cfg).toBeUndefined()
+    expect(JSON.parse(testMem.get('xc_cfg')).text.key).toBe('sk-just-typed')
+    expect(JSON.parse(testMem.get('xc_cfg')).rd.key).toBe('sk-rd-typed')
   })
 
   it('同步时修复 xc_tasks 里被二次序列化的任务数组', () => {
@@ -111,7 +117,40 @@ describe('cloudSync 多端安全合并', () => {
     const localItems = JSON.parse(JSON.parse(JSON.stringify(localStorage.getItem('xc_msgs'))))
     expect(localItems.map((x) => x.id)).toEqual(['m1', 'm2'])
     expect(plan.sameAsRemote).toBe(false)
-    expect(JSON.parse(localStorage.getItem('xc_cfg')).webdav.pass).toBe('secret')
+    expect(localStorage.getItem('xc_cfg')).toBeNull()
+  })
+
+  it('手机上传的旧配置即使损坏或含空 Key，也不会覆盖网页本机设置', () => {
+    testMem.clear()
+    const localCfg = { rd: { prov: 'qwen', model: 'qwen3.8-max' }, text: { key: 'sk-web-local' } }
+    testMem.set('xc_cfg', JSON.stringify(localCfg))
+    const local = { data: { xc_cfg: testMem.get('xc_cfg'), xc_msgs: '[]' } }
+    const remote = {
+      data: {
+        xc_cfg: JSON.stringify({ text: { key: '' }, vision: null, fig: null, rd: null, ttsDash: null })
+      }
+    }
+    const plan = applyLocalMerge(local, remote, {})
+    const fixed = JSON.parse(localStorage.getItem('xc_cfg'))
+    expect('xc_cfg' in plan.merged).toBe(false)
+    expect(fixed.rd.prov).toBe('qwen')
+    expect(fixed.text.key).toBe('sk-web-local')
+  })
+
+  it('单向下载云端时忽略 xc_cfg，不覆盖网页本机 Key 与模型设置', () => {
+    testMem.clear()
+    const localCfg = { text: { key: 'sk-web-local', prov: 'qwen', model: 'qwen3.8-max' } }
+    testMem.set('xc_cfg', JSON.stringify(localCfg))
+    const env = makeCloudEnvelope({
+      xc_cfg: JSON.stringify({ text: { key: '' }, rd: null, ttsDash: null }),
+      xc_msgs: JSON.stringify([{ id: 'm1', t: 1690000000100, role: 'assistant' }])
+    })
+    const report = restoreCloudSnapshot(env)
+    const fixed = JSON.parse(localStorage.getItem('xc_cfg'))
+    expect(report.failed).toEqual([])
+    expect(fixed.text.key).toBe('sk-web-local')
+    expect(fixed.text.prov).toBe('qwen')
+    expect(store.msgs.map((m) => m.id)).toEqual(['m1'])
   })
 
   it('同步合并后把对话记录回填到界面（此前只回填错题，导致“另一端对话没同步”）', () => {

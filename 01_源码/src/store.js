@@ -5,6 +5,7 @@ import { showToast } from './utils/toast'
 import { safeSet, KEYS, migrate } from './utils/storage'
 import { extractChoices, answerLetter } from './utils/quiz'
 import { addWrongDeleted, filterDeletedWrongs, loadWrongDeleted } from './utils/wrongDelete'
+import { PROVIDERS, defaultModelOf, mergedModelsOf, providerOf } from './api/modelRegistry'
 const D = () => ({
   text: { prov: 'ds', key: '', url: 'https://api.deepseek.com/chat/completions', model: 'deepseek-flash' },
   vision: {
@@ -102,19 +103,90 @@ const D = () => ({
     model: 'deepseek-flash'
   }
 })
+function plainObject(v) {
+  return !!v && typeof v === 'object' && !Array.isArray(v)
+}
+function textValue(v, fallback = '') {
+  return typeof v === 'string' ? v : fallback
+}
+function mergeDefaults(def, raw) {
+  if (raw === undefined) return def
+  if (raw === null) return plainObject(def) ? { ...def } : raw
+  if (plainObject(def) && plainObject(raw)) {
+    const out = { ...def }
+    for (const [k, v] of Object.entries(raw)) out[k] = mergeDefaults(def[k], v)
+    return out
+  }
+  return raw
+}
+function normalizeCustomModels(raw) {
+  const out = {}
+  for (const cat of ['text', 'vision', 'fig']) {
+    const srcCat = plainObject(raw && raw[cat]) ? raw[cat] : {}
+    out[cat] = {}
+    for (const [prov, list] of Object.entries(srcCat)) {
+      if (!Array.isArray(list)) continue
+      out[cat][prov] = list
+        .filter((x) => plainObject(x) && x.id)
+        .map((x) => ({ ...x, id: String(x.id), label: textValue(x.label, String(x.id)) }))
+    }
+  }
+  return out
+}
+function normalizeModelSection(raw, def, cat, customModels) {
+  const src = plainObject(raw) ? raw : {}
+  const out = { ...def, ...src }
+  const providers = PROVIDERS[cat] || {}
+  const originalProv = out.prov
+  if (!Object.prototype.hasOwnProperty.call(providers, out.prov)) out.prov = def.prov
+  out.key = textValue(out.key, '')
+  const provider = providerOf(out.prov, cat)
+  const ownUrl = textValue(src.url, '').trim()
+  out.url = originalProv === out.prov && ownUrl ? ownUrl : (provider.url || def.url || '')
+  const list = mergedModelsOf(out.prov, cat, customModels)
+  const model = textValue(out.model, '')
+  if (out.prov === 'custom') out.model = model
+  else out.model = list.some((m) => m.id === model) ? model : (defaultModelOf(out.prov, cat) || def.model || '')
+  return out
+}
+// 老配置、跨版本备份和云恢复都可能缺少后来新增的子对象。
+// 在 store 载入时逐分类补全，避免设置页出现“服务商可选、模型清单为空/选择无效”。
+export function normalizeCfg(raw) {
+  const base = D()
+  const src = plainObject(raw) ? raw : {}
+  const out = mergeDefaults(base, src)
+  out.customModels = normalizeCustomModels(src.customModels)
+  out.text = normalizeModelSection(src.text, base.text, 'text', out.customModels)
+  out.vision = normalizeModelSection(src.vision, base.vision, 'vision', out.customModels)
+  out.fig = normalizeModelSection(src.fig, base.fig, 'fig', out.customModels)
+  out.rd = normalizeModelSection(src.rd, base.rd, 'text', out.customModels)
+  out.ttsGm = { ...base.ttsGm, ...(plainObject(src.ttsGm) ? src.ttsGm : {}) }
+  out.ttsOpenAI = { ...base.ttsOpenAI, ...(plainObject(src.ttsOpenAI) ? src.ttsOpenAI : {}) }
+  out.ttsDash = { ...base.ttsDash, ...(plainObject(src.ttsDash) ? src.ttsDash : {}) }
+  out.ttsGm.key = textValue(out.ttsGm.key, '')
+  out.ttsGm.url = textValue(out.ttsGm.url, base.ttsGm.url)
+  out.ttsGm.model = textValue(out.ttsGm.model, base.ttsGm.model)
+  out.ttsGm.voice = textValue(out.ttsGm.voice, base.ttsGm.voice)
+  out.ttsOpenAI.key = textValue(out.ttsOpenAI.key, '')
+  out.ttsOpenAI.url = textValue(out.ttsOpenAI.url, base.ttsOpenAI.url)
+  out.ttsOpenAI.model = textValue(out.ttsOpenAI.model, base.ttsOpenAI.model)
+  out.ttsOpenAI.voice = textValue(out.ttsOpenAI.voice, base.ttsOpenAI.voice)
+  out.ttsDash.key = textValue(out.ttsDash.key, '')
+  out.ttsDash.url = textValue(out.ttsDash.url, base.ttsDash.url)
+  out.ttsDash.model = textValue(out.ttsDash.model, base.ttsDash.model)
+  out.ttsDash.voice = textValue(out.ttsDash.voice, base.ttsDash.voice)
+  out.ttsDash.voiceCustom = textValue(out.ttsDash.voiceCustom, '')
+  if (!Array.isArray(out.ttsDash.customVoices)) out.ttsDash.customVoices = []
+  if (!['glm', 'dash', 'openai', 'edge', 'sys'].includes(out.ttsMode)) out.ttsMode = 'sys'
+  return out
+}
 export const store = reactive({ cfg: D(), mode: 'all', msgs: [], wqs: [], myMem: [], notes: [], tab: 'chat', busy: false, readCtx: null, curQ: null, uiCtx: { panel: null, examMgr: false }, pendingAsk: '', pendingOpenPaper: null, pendingFocus: false })
 export function load() {
   try {
     const s = localStorage.getItem('xc_cfg')
     if (s) {
       const d = JSON.parse(s)
-      store.cfg = Object.assign(D(), d, {
-        text: Object.assign(D().text, d.text || {}),
-        vision: Object.assign(D().vision, d.vision || {}),
-        fig: Object.assign(D().fig, d.fig || {}),
-        ttsGm: Object.assign(D().ttsGm, d.ttsGm || {}),
-        ttsOpenAI: Object.assign(D().ttsOpenAI, d.ttsOpenAI || {})
-      })
+      store.cfg = normalizeCfg(d)
     }
   } catch (e) {}
   // v3.8.68 省钱默认迁移（仅对「从未表达过朗读偏好」的旧配置生效）：
@@ -235,6 +307,8 @@ export function load() {
   try {
     if (!Array.isArray(store.cfg.petChatLog)) store.cfg.petChatLog = []
   } catch (e) {}
+  // 归一化后的完整配置立即落盘，修掉历史版本/云同步留下的 null、空对象和缺失模型字段。
+  try { safeSet(KEYS.CFG, store.cfg) } catch (e) {}
 }
 export const saveCfg = () => { safeSet(KEYS.CFG, store.cfg) }
 function serializeMsgs(list, level = 0) {

@@ -1,15 +1,15 @@
 // cloudSync.js —— 多端“安全合并云同步”
 // 网页 / iPad / 安卓共用同一份 WebDAV 文件；同步时先把云端拉下来与本机做集合级合并，
-// 避免“后打开的一端整包覆盖另一端”。学习数据与设置全量同步；API Key / WebDAV 密码只上传 *** 占位。
-import { store } from '../store'
-import { collectAll, restoreAllDetailed, mergeMaskedConfig } from './dataBackup'
+// 避免“后打开的一端整包覆盖另一端”。仅同步学习数据；xc_cfg（模型/Key/同步密码/外观/语音等设置）永不上云。
+import { store, normalizeCfg } from '../store'
+import { collectAll, restoreAllDetailed, mergeMaskedConfig, isSecretConfigKey } from './dataBackup'
 import { stripSecrets } from './stripSecrets'
 import { webdavSyncUrl, wdAuthHeaders, webdavGet, webdavPutFile } from './webdav'
 import { WRONG_DELETED_KEY, filterDeletedWrongs, parseWrongDeleted } from './wrongDelete'
 
 export const SYNC_STATE_KEY = 'xc_sync_state'
 const LOCAL_ONLY_KEYS = new Set([
-  'xc_auth', 'xc_auth_verify', 'xc_errlog', 'xc_global_fab',
+  'xc_cfg', 'xc_auth', 'xc_auth_verify', 'xc_errlog', 'xc_global_fab',
   'xc_chat_tools', 'xc_onboarded',
   'xc_guided', 'xc_guides_off', 'xc_draft_fab_on', 'xc_draft_opacity',
   'xc_draft_mode', 'xc_draft_size', 'xc_draft_mini_pos', 'xc_weak_toast',
@@ -69,6 +69,8 @@ export function cloudSyncUrl() {
 
 // 云上传以当前内存中的完整学习数据为准，避免本地因空间紧张压缩图片后，云端也只收到压缩版。
 export function collectCloudData() {
+  // 自动同步可能紧跟在 Key 输入之后触发；先把内存中的最新配置落盘，避免读入旧的空 Key。
+  try { localStorage.setItem('xc_cfg', JSON.stringify(store.cfg || {})) } catch (e) {}
   const all = collectAll()
   if (!all.data || typeof all.data !== 'object') all.data = {}
   const put = (key, value) => {
@@ -274,7 +276,13 @@ function deepMergeValue(key, lv, rv, depth = 0, preferRemote = false) {
       const out = { ...a }
       for (const k in b) {
         const bv = b[k]
-        out[k] = k in out ? deepMergeValue(key + '.' + k, out[k], bv, depth + 1, preferRemote) : bv
+        const childKey = key + '.' + k
+        if (!(k in out)) { out[k] = bv; continue }
+        const scalar = deepMergeValue(childKey, out[k], bv, depth + 1, preferRemote)
+        if (scalar != null) { out[k] = scalar; continue }
+        // 嵌套标量冲突：密钥字段永远保留本机值；普通配置在远端确认为新版本时才采用远端。
+        if (String(key).startsWith('xc_cfg') && isSecretConfigKey(k)) out[k] = out[k] == null ? '' : out[k]
+        else out[k] = preferRemote ? bv : (out[k] == null ? bv : out[k])
       }
       return JSON.stringify(out)
     } catch (e) { return lv }
@@ -396,7 +404,7 @@ function writeMerged(data) {
     if (k === 'xc_cfg') {
       try {
         const cur = JSON.parse(localStorage.getItem(k) || '{}')
-        raw = JSON.stringify(mergeMaskedConfig(JSON.parse(raw || '{}'), cur))
+        raw = JSON.stringify(normalizeCfg(mergeMaskedConfig(JSON.parse(raw || '{}'), cur)))
       } catch (e) {}
     }
     if (localStorage.getItem(k) === raw) continue
@@ -460,6 +468,9 @@ export function hydrateStoreFromPlan(plan) {
   if (notes) store.notes = notes
   const mem = parseArr('xc_my_mem')
   if (mem) store.myMem = mem
+  if (typeof m.xc_cfg === 'string') {
+    try { store.cfg = normalizeCfg(JSON.parse(m.xc_cfg)) } catch (e) {}
+  }
   if (typeof m.xc_mode === 'string' && m.xc_mode) {
     try { store.mode = JSON.parse(m.xc_mode) } catch (e) { store.mode = m.xc_mode }
   }
@@ -474,7 +485,10 @@ export function hydrateStoreFromRaw(remoteRaw) {
 // 若仍失败，不再向用户误报“下载成功”，而是直接暴露存储空间/浏览器阻止写入原因。
 export function restoreCloudSnapshot(remoteRaw) {
   const remote = syncScopeFromBackup(remoteRaw)
-  const report = restoreAllDetailed(remoteRaw)
+  const cloudOnly = remoteRaw && remoteRaw.data && typeof remoteRaw.data === 'object'
+    ? { ...remoteRaw, data: remote }
+    : remote
+  const report = restoreAllDetailed(cloudOnly)
   const failed = Array.isArray(report.failed) ? report.failed : []
   if (Object.prototype.hasOwnProperty.call(remote, 'xc_wqs') && failed.includes('xc_wqs')) {
     throw new Error('云端错题集未写入本机：请先导出本机备份并清理浏览器站点存储空间后重试')

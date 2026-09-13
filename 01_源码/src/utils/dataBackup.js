@@ -2,6 +2,7 @@
 // dataBackup.js —— 统一“全量数据备份”（设置/对话/错题/知识库/战绩/出题历史/记忆库…一切 xc_* 键）
 // 供三路共用：📦导出JSON / 保存到本地文件夹 / WebDAV 云同步；导入时密钥打码字段保留本机现值
 import { stripSecrets, scrubSecretValues, containsSecretLike, maskSecretText } from './stripSecrets'
+import { normalizeCfg } from '../store'
 
 export function collectAll() {
   const data = {}
@@ -69,14 +70,19 @@ function orderedRestoreKeys(items) {
   })
 }
 
-// 云同步里的 cfg 只保存 *** 占位；恢复/合并时用本机实际密钥补回，既不泄露也不误清空。
-export function mergeMaskedConfig(masked, local) {
+export function isSecretConfigKey(k) {
+  return /(?:^|\.)(?:key|token|pass|password|secret|credential)$/i.test(String(k || ''))
+}
+
+// 备份里的 cfg 可能只保存 *** 占位；恢复/合并时始终以本机密钥为准，既不泄露也不误清空。
+export function mergeMaskedConfig(masked, local, key = '') {
   if (masked === '***') return local
-  if (Array.isArray(masked)) return masked.map((v, i) => mergeMaskedConfig(v, Array.isArray(local) ? local[i] : undefined))
+  if (isSecretConfigKey(key)) return local || ''
+  if (Array.isArray(masked)) return masked.map((v, i) => mergeMaskedConfig(v, Array.isArray(local) ? local[i] : undefined, key))
   if (masked && typeof masked === 'object') {
     const base = local && typeof local === 'object' && !Array.isArray(local) ? local : {}
     const out = { ...base }
-    for (const k of Object.keys(masked)) out[k] = mergeMaskedConfig(masked[k], base[k])
+    for (const k of Object.keys(masked)) out[k] = mergeMaskedConfig(masked[k], base[k], k)
     return out
   }
   return masked
@@ -96,7 +102,7 @@ export function restoreAllDetailed(obj) {
     let v = items[k]
     if (k === 'xc_cfg') {
       try {
-        const cur = mergeMaskedConfig(JSON.parse(String(v)), prevCfg)
+        const cur = normalizeCfg(mergeMaskedConfig(JSON.parse(String(v)), prevCfg))
         v = JSON.stringify(cur)
       } catch (e) {}
     }

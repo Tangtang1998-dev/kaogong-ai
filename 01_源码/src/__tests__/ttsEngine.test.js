@@ -13,6 +13,7 @@ import {
   genEdgeSecMsGec,
   glmSynthesize,
   openaiSynthesize,
+  speakPro,
   listGmVoices,
   GLM_PRESET_VOICES,
   EDGE_PRESET_VOICES,
@@ -254,6 +255,45 @@ describe('openaiCfg OpenAI 兼容配置', () => {
     const cfg = openaiCfg()
     expect(cfg.url).toBe('https://api.siliconflow.cn/v1/audio/speech')
     expect(cfg.model).toContain('CosyVoice2')
+  })
+})
+
+describe('真人引擎失败回退（回归：不得只弹网络错误而无声音）', () => {
+  beforeEach(() => {
+    store.cfg.ttsMode = 'openai'
+    store.cfg.ttsGuard = false
+    store.cfg.ttsOpenAI = { key: 'k', url: 'https://api.siliconflow.cn/v1', model: 'FunAudioLLM/CosyVoice2-0.5B', voice: 'default' }
+    store.cfg.ttsRate = 1
+  })
+  afterEach(() => { vi.unstubAllGlobals() })
+
+  it('OpenAI 兼容网络失败时静默回退本机语音，只触发 onFallback 不触发 onError', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('Failed to fetch') }))
+    const spoken = []
+    class FakeUtterance {
+      constructor(text) { this.text = text }
+    }
+    vi.stubGlobal('SpeechSynthesisUtterance', FakeUtterance)
+    vi.stubGlobal('window', {
+      speechSynthesis: {
+        speak: (u) => spoken.push(u.text),
+        cancel: () => {},
+        paused: false,
+        speaking: false,
+        pending: false,
+        resume: () => {}
+      },
+      addEventListener: () => {},
+      removeEventListener: () => {}
+    })
+    const onFallback = vi.fn()
+    const onError = vi.fn()
+    const r = await speakPro('这是一段用于验证回退的网络错误场景文本。', { engine: 'openai', rate: 1, pitch: 1, onFallback, onError })
+    expect(r.ok).toBe(true)
+    expect(r.fallback).toBe(true)
+    expect(onFallback).toHaveBeenCalled()
+    expect(onError).not.toHaveBeenCalled()
+    expect(spoken.join('')).toContain('这是一段用于验证回退')
   })
 })
 

@@ -120,6 +120,13 @@ function errToast(msg) {
   _lastErrToast = now
   try { showToast('🔊 朗读失败：' + String(msg || '').slice(0, 80), 'error') } catch (e) {}
 }
+let _lastFallbackToast = 0
+function fallbackToast() {
+  const now = Date.now()
+  if (now - _lastFallbackToast < 8000) return
+  _lastFallbackToast = now
+  try { showToast('🔊 真人音色连接失败，已自动改用本机语音；本次仍可正常朗读和永久重读', 'info') } catch (e) {}
+}
 
 // 朗读：opts={ scene:'lady', rate:1, pitch:null, onEnd: fn, onError: fn }
 // 按 store.cfg.ttsMode 分发：glm(默认·智谱超拟人) / openai / edge / sys
@@ -138,6 +145,7 @@ export function speak(text, opts) {
     pinCache: opts.pinCache === true,
     singleRequest: opts.singleRequest === true,
     onEnd: opts.onEnd,
+    onFallback: (msg) => { fallbackToast(); if (opts.onFallback) opts.onFallback(msg) },
     onError: (msg) => { errToast(msg); if (opts.onError) opts.onError(msg) }
   })
 }

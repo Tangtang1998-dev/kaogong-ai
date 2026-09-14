@@ -1601,7 +1601,7 @@ export async function speakPro(text, opts = {}) {
     if (mode === 'openai') {
       // 流式：分块边到边播，第一块一到就开口
       const r = await openaiSynthesize(t, { voice: opts.voice, model: opts.model, speed: opts.speed, chunkSize, firstChunkSize, pinCache: opts.pinCache === true, onChunk: (buf, text) => enqueueGapless(buf, text, 'audio/mpeg') })
-      return await streamFinish(r, opts)
+      return await finishStreamOrFallback(r, opts, t)
     }
     if (mode === 'dash') {
       // 阿里百炼 Qwen3-TTS：同流式分块，第一块一到就开口（mpeg）
@@ -1627,9 +1627,13 @@ export async function speakPro(text, opts = {}) {
       // 【v3.8.332】Edge 失败（实测常因 403/网络不通）→ 回退系统语音，保证「一定读得出来」。
       // 原先 Edge 分支无回退，失败就直接静默，用户以为功能坏了。
       setStatus('error', '❌ ' + (r.msg || 'Edge 语音不可用'))
-      if (opts.onError) opts.onError(r.msg || 'edge-fail')
       const edgeFallback = sysSpeak(t, { rate: opts.rate, pitch: opts.pitch, onEnd: opts.onEnd, onError: opts.onError })
       setStatus(edgeFallback ? 'done' : 'error', edgeFallback ? '⚠️ Edge 语音失败，已回退系统语音' : '❌ 朗读失败')
+      if (edgeFallback) {
+        if (opts.onFallback) opts.onFallback(r.msg || 'edge-fail')
+      } else if (opts.onError) {
+        opts.onError(r.msg || 'edge-fail')
+      }
       return { ok: edgeFallback, msg: r.msg, fallback: true }
     }
     if (mode === 'sys') {
@@ -1641,16 +1645,37 @@ export async function speakPro(text, opts = {}) {
     const r = await glmSynthesize(t, { voice: opts.voice, model: opts.model, speed: opts.speed, chunkSize, firstChunkSize, pinCache: opts.pinCache === true, onChunk: (buf, text) => enqueueGapless(buf, text, 'audio/wav') })
     if (r.ok) return await streamFinish(r, opts)
     setStatus('error', '❌ ' + r.msg)
-    if (opts.onError) opts.onError(r.msg)
     const fallback = sysSpeak(t, { rate: opts.rate, pitch: opts.pitch, onEnd: opts.onEnd, onError: opts.onError })
     setStatus(fallback ? 'done' : 'error', fallback ? '⚠️ 真人引擎失败，已回退系统语音' : '❌ 朗读失败')
+    if (fallback) {
+      if (opts.onFallback) opts.onFallback(r.msg)
+    } else if (opts.onError) {
+      opts.onError(r.msg || '朗读失败')
+    }
     return { ok: fallback, msg: r.msg, fallback: true }
   } catch (e) {
     setStatus('error', '❌ ' + e.message)
-    if (opts.onError) opts.onError(e.message)
     const fallback = sysSpeak(t, { rate: opts.rate, pitch: opts.pitch, onEnd: opts.onEnd, onError: opts.onError })
+    if (fallback) {
+      if (opts.onFallback) opts.onFallback(e.message)
+    } else if (opts.onError) {
+      opts.onError(e.message || '朗读失败')
+    }
     return { ok: fallback, msg: e.message, fallback: true }
   }
+}
+// 流式真人引擎失败时也保证出声：本机系统语音接管，且不向调用方抛“网络错误”。
+async function finishStreamOrFallback(r, opts, text) {
+  if (r.ok) return await streamFinish(r, opts)
+  setStatus('error', '❌ ' + (r.msg || '真人语音不可用'))
+  const fallback = sysSpeak(text, { rate: opts.rate, pitch: opts.pitch, onEnd: opts.onEnd, onError: opts.onError })
+  setStatus(fallback ? 'done' : 'error', fallback ? '⚠️ 真人引擎失败，已回退系统语音' : '❌ 朗读失败')
+  if (fallback) {
+    if (opts.onFallback) opts.onFallback(r.msg || 'tts-fail')
+  } else if (opts.onError) {
+    opts.onError(r.msg || '朗读失败')
+  }
+  return { ok: fallback, msg: r.msg, fallback: true }
 }
 // 流式完成：等待队列播完（或播放失败）再回调 onEnd/onError
 function streamFinish(r, opts) {

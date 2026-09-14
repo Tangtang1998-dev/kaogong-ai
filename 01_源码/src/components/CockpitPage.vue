@@ -13,6 +13,7 @@ import { mergeWeakTasks } from '../utils/weakTask' // 补弱任务（深化）
 import { todaySeconds, totalSeconds, fmtMin, studyTick, studyMap } from '../utils/study'
 import { loadCheckinState, checkInToday, currentStreak, checkinWeek } from '../utils/checkin'
 import { readSyncState } from '../utils/cloudSync'
+import { buildLearningProfile, buildDailyPlan } from '../utils/learningCore'
 
 // 今日练习：统计今天(按日期)的 user 提问数（chat 记录无 time，用日期近似——用 store 计数即可，标注"累计"更稳）
 const ck = computed(() => {
@@ -90,18 +91,20 @@ function syncTimeLabel(ts) {
 }
 const syncInfo = computed(() => readSyncState())
 const localDataSummary = computed(() => ({ asks: ck.value.q, wrongs: ck.value.w, reviewed: ck.value.r }))
+const corePlan = computed(() => buildDailyPlan({ profile: buildLearningProfile({ msgs: store.msgs, wqs: store.wqs, attempts: readAttempts(), study: studyMap(), streak: streak.value, todayChecked: checkedToday.value }) }))
 const commandActions = computed(() => {
   const due = Number(hubCnt.value || 0)
-  const unreviewed = Math.max(0, Number(ck.value.w) - Number(ck.value.r))
-  const weak = weakPlate()
-  const actions = [
-    { id: 'due', icon: '🔔', title: due ? '清掉 ' + due + ' 个到期任务' : '到期已清空', desc: due ? '按记忆曲线回访，防止旧错重新固化' : '今天的复习节奏很稳', action: { type: 'hub' }, priority: due ? 100 : 35, disabled: !due },
-    { id: 'wrong', icon: '📋', title: unreviewed ? '复盘 ' + unreviewed + ' 道错题' : '错题已复盘', desc: unreviewed ? '逐题找错因，别让错题只囤不消化' : '可以去二刷或做变式', action: { type: 'tab', target: 'wq' }, priority: unreviewed ? 92 : 38, disabled: false },
-    { id: 'quiz', icon: '🎯', title: weak ? '专项练「' + weak + '」' : '开始智能出题', desc: 'AI 按当前薄弱板块生成真题感练习', action: { type: 'quiz' }, priority: weak ? 86 : 55, disabled: false },
-    { id: 'daily', icon: '🌅', title: '每日必刷三大块', desc: '资料、言语、逻辑一次打包，直接开刷', action: { type: 'daily' }, priority: 72, disabled: false },
-    { id: 'kb', icon: '📚', title: '看一张知识卡', desc: '从统一知识卡工作台快速补概念', action: { type: 'tab', target: 'kb' }, priority: 62, disabled: false },
-    { id: 'sync', icon: '☁️', title: syncInfo.value.last ? '同步状态正常' : '完成首次云同步', desc: syncInfo.value.last ? syncTimeLabel(syncInfo.value.last) + ' · ' + (syncInfo.value.lastAction || '数据已同步') : '建议上传或下载一次，确认多端数据一致', action: { type: 'tab', target: 'sync' }, priority: syncInfo.value.last ? 42 : 76, disabled: false }
-  ]
+  const iconMap = { due: '🔔', review: '📋', repeat: '🧬', focus: '🎯', coverage: '🧭', keep: '✨' }
+  const actions = corePlan.value.map((t, i) => ({
+    id: t.k,
+    icon: iconMap[t.k] || '📌',
+    title: t.label,
+    desc: t.reason,
+    action: t.action || { type: 'tab', target: 'chat' },
+    priority: 100 - i,
+    disabled: false
+  }))
+  actions.push({ id: 'sync', icon: '☁️', title: syncInfo.value.last ? '同步状态正常' : '完成首次云同步', desc: syncInfo.value.last ? syncTimeLabel(syncInfo.value.last) + ' · ' + (syncInfo.value.lastAction || '数据已同步') : '建议上传或下载一次，确认多端数据一致', action: { type: 'tab', target: 'sync' }, priority: due ? 20 : 50, disabled: false })
   return actions.sort((a, b) => b.priority - a.priority)
 })
 const nextBestAction = computed(() => commandActions.value.find((x) => !x.disabled) || commandActions.value[0])
@@ -109,7 +112,7 @@ function runCommand(a) {
   if (!a || a.disabled) return
   const x = a.action || {}
   if (x.type === 'hub') return openHub()
-  if (x.type === 'tab') return goto(x.target)
+  if (x.type === 'tab') { if (x.prompt) store.pendingAsk = x.prompt; return goto(x.target) }
   if (x.type === 'quiz') {
     store.pendingAsk = '请给我出一道' + (weakPlate() || '判断推理') + '仿真题，先给题干和四个选项，不要提前给答案'
     goto('chat')
@@ -226,27 +229,8 @@ function weakPlate() {
   return best ? best.k : null
 }
 function genTasks() {
-  const wp = weakPlate()
-  const pending = store.wqs.filter((q) => !q.digested).length
-  // 批次8·目标分拆解联动：找出"还差最多分"的板块 → 生成专项补强任务（建议题量按缺口 x2 封顶 10）
-  const goal = store.cfg.goalScore || 70
-  const gb = cpMastery.value.items
-    .filter((x) => x.v != null)
-    .map((x) => {
-      const need = Math.round(((goal * x.weight) / 100) * 10) / 10
-      const cur = Math.round(((x.v * x.weight) / 100) * 10) / 10
-      return { label: x.label, gap: Math.max(0, Math.round((need - cur) * 10) / 10) }
-    })
-    .sort((a, b) => b.gap - a.gap)[0]
-  const goalTasks = gb && gb.gap > 0
-    ? [{ k: 'goal', label: '专项补强【' + gb.label + '】（还差 ' + gb.gap + ' 分）· 刷 ' + Math.min(10, 2 + Math.ceil(gb.gap * 2)) + ' 题（对话页）', done: false }]
-    : []
-  tasks.value = [
-    { k: 'practice', label: wp ? '刷 5 道「' + wp + '」并开考场计时（对话页）' : '刷 5 道题并开考场计时（对话页）', done: false },
-    { k: 'redo', label: '复盘/二刷 ' + Math.min(3, pending || 1) + ' 道错题（错题页）', done: false },
-    { k: 'accum', label: '积累 2 条常识/时政（积累页）', done: false },
-    ...goalTasks
-  ]
+  const profile = buildLearningProfile({ msgs: store.msgs, wqs: store.wqs, attempts: readAttempts(), study: studyMap(), streak: streak.value, todayChecked: checkedToday.value })
+  tasks.value = buildDailyPlan({ profile, existingTasks: tasks.value })
   saveTasks()
 }
 function saveTasks() {

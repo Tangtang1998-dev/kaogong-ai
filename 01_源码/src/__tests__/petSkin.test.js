@@ -103,8 +103,35 @@ describe('内置角色锁定：形象/声线不可改', () => {
     expect(petUnbindCloneVoice('lixingyun')).toBe(null)
   })
   it('锁定角色仍可用内置克隆原声（切到它即用）', () => {
+    store.cfg.ttsGm = { key: 'k', url: '', model: 'glm-tts', voice: 'tongtong' }
+    store.cfg.fig = { key: '', url: '' }
+    store.cfg.ttsMode = 'glm'
     applyPetSkin('lixingyun')
     expect(store.cfg.ttsGm.voice).toBe('a6d7ba90-7cd6-5ef6-9f37-d259112f8be1')
+  })
+  it('九个内置角色没有克隆 Key 时也都有各自的免费 Edge 默认声线', () => {
+    store.cfg.ttsGm = { key: '', url: '', model: '', voice: '' }
+    store.cfg.fig = { key: '', url: '' }
+    store.cfg.ttsMode = 'sys'
+    const expected = {
+      xueshen: 'zh-CN-YunjianNeural',
+      zhangruonan: 'zh-CN-XiaoxiaoNeural',
+      lixingyun: 'zh-CN-YunxiNeural',
+      jiruxue: 'zh-CN-XiaoyiNeural',
+      huasheng13: 'zh-CN-YunjianNeural',
+      xiaop: 'zh-CN-YunxiNeural',
+      xiaohei: 'zh-CN-YunyangNeural',
+      wenjie: 'zh-CN-XiaoyiNeural',
+      jinshen: 'zh-CN-XiaomoNeural'
+    }
+    for (const id of Object.keys(expected)) {
+      applyPetSkin(id)
+      expect(petSkinVoiceOf(id).preset).toBe(true)
+      expect(petSkinVoiceOf(id).engine).toBe('edge')
+      expect(store.cfg.ttsMode).toBe('edge')
+      expect(store.cfg.ttsEdgeVoice).toBe(expected[id])
+      expect(petSpeakOpts()).toMatchObject({ engine: 'edge', voice: expected[id] })
+    }
   })
   it('内置角色允许写入自动生成的真实克隆声线，并优先于内置近似声线', () => {
     petBindBuiltinVoice('huasheng13', { engine: 'glm', voice: 'real-clone-id', name: '花生十三内置原声' })

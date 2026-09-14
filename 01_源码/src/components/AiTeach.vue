@@ -11,6 +11,7 @@ import { cardMatchesWrongTaxon } from '../utils/wrongTaxonomy'
 import { pickGenCfg } from '../utils/fastMode'
 import { buildPlainTranslationPrompt, sanitizePlainTranslation, translationKindLabel } from '../utils/plainTranslate'
 import { speak, stopSpeak, primeTts, TTS_ENGINES } from '../utils/tts'
+import { buildMicroLesson, readLessonProgress, writeLessonProgress } from '../utils/microLessonFactory'
 import AiLessonStage from './AiLessonStage.vue'
 
 const props = defineProps({
@@ -263,6 +264,7 @@ function replayScene() { gotoScene(sceneIdx.value) }
 function markSceneUnderstood(ok) {
   const i = sceneIdx.value
   sceneMastery.value = Object.assign({}, sceneMastery.value, { [i]: !!ok })
+  if (topic.value && topic.value.card && topic.value.card.id) writeLessonProgress({ [topic.value.card.id]: sceneMastery.value })
   if (ok) {
     if (i < scenes.value.length - 1) next()
     return
@@ -312,6 +314,7 @@ function checkPoint(k) {
 function selectTopic(t) {
   topic.value = t
   lesson.value = getCachedLesson(t.card)
+  try { sceneMastery.value = readLessonProgress()[t.card.id] || {} } catch (e) { sceneMastery.value = {} }
   sceneIdx.value = 0
   playing.value = false
   checkpointPick.value = ''
@@ -320,25 +323,7 @@ function selectTopic(t) {
   if (lesson.value) showToast('已读取本地缓存的完整微课讲稿', 'info')
 }
 function localLesson(card) {
-  const plate = card.plate || '行测'
-  const type = card.type || '核心方法'
-  return {
-    title: plate + ' · ' + type,
-    objective: '学完后能独立识别「' + type + '」的信号，按步骤处理题目，并说清最容易错在哪里。',
-    takeaways: [card.tip || '先判题型，再走方法步骤。', (card.steps || [])[0] || '把方法落到第一步动作。', (card.traps || [])[0] || '警惕主体、方向、范围和力度陷阱。'],
-    scenes: [
-      { type: 'hook', icon: '🎯', title: '这道题真正考什么', body: '不是背概念，而是识别命题结构。', points: ['识别信号：' + (card.signs || []).join('；'), '考试目标：把材料翻译成可判断的结构'] },
-      { type: 'deep', icon: '🔬', title: '为什么这个方法成立', body: (card.detail || card.tip || '先找论据与结论的共同话题，再判断选项是连接、切断还是偷换。'), points: ['先看命题人改变哪一块', '再判断选项作用方向', '最后比较力度和范围'] },
-      { type: 'flow', icon: '🧭', title: '读题先翻译，不先看选项', body: '先把题干压缩成“谁想让谁相信什么”。', points: ['找主体', '找结论', '找证据', '找隐藏前提'] },
-      { type: 'process', icon: '🪜', title: '按步骤拆解', body: (card.steps || []).join(' → ') || '题型识别 → 结构还原 → 选项比较 → 回文验证', points: card.steps || [] },
-      { type: 'example', icon: '📝', title: '跟着例题走一遍', body: '把方法放进真实题目里，才叫会。', example: card.example || { q: '示例题：先翻译结论与论据，再判断选项作用方向。', opts: ['A 只重复论据', 'B 建立论据与结论的联系', 'C 偷换主体', 'D 无关信息'], answer: 'B', path: 'B同时连接论据和结论，作用方向最直接。' } },
-      { type: 'compare', icon: '⚖️', title: '比较选项，不比“谁更像”', body: '统一用主体、方向、范围、力度四把尺子。', points: ['主体是否一致', '方向是否对应', '范围是否偷换', '力度是否相当'] },
-      { type: 'checkpoint', icon: '🧠', title: '停下来检查一下', body: '题干里最重要的第一步应该是什么？', options: [{ k: 'A', t: '先看哪个选项熟悉' }, { k: 'B', t: '先把结论和论据翻译出来' }], answer: 'B', explain: '先还原结构，才不会被熟悉词带跑。' },
-      { type: 'trap', icon: '⚠️', title: '最容易错在哪里', body: (card.traps || []).join('；') || '主体偷换、范围扩大、方向反转、力度不足。', points: card.traps || [] },
-      { type: 'summary', icon: '🧠', title: '把方法变成动作', body: card.tip || '先翻译题干，再做判断。', points: ['下次先复述结论', '再定位证据', '最后比较选项方向'] },
-      { type: 'apply', icon: '🚀', title: '现在就应用', body: '把刚学的方法立刻用一道题检验。', points: ['去逻辑翻译', '去 AI 出题练同类题', '把方法加入记忆复习'] }
-    ]
-  }
+  return buildMicroLesson(card, relatedWrongs.value)
 }
 async function buildLesson() {
   if (!topic.value) { showToast('先选一个学习主题', 'info'); return }

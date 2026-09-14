@@ -5794,3 +5794,76 @@ body[data-theme='light'] .tab-order-row { background:#f7faf9; }
   .ck-goal-row { gap: 6px; }
   .ck-goal-pill { flex: 1 1 46%; }
 }
+
+/* ===== v3.8.348 输入工具栏：改为内联托盘，不再覆盖对话正文 ===== */
+.e-dock {
+  flex-wrap: wrap;
+  row-gap: 8px;
+}
+.composer-main {
+  min-width: min(560px, 52vw);
+}
+.dock-more {
+  position: static;
+  order: 3;
+  flex: 0 0 100%;
+  width: 100%;
+  max-width: min(100%, 820px);
+  margin-inline: auto;
+  min-width: 0;
+  max-height: min(42vh, 340px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  align-items: start;
+  gap: 8px;
+  padding: 10px;
+}
+.dock-more .dock-hd {
+  grid-column: 1 / -1;
+}
+.dock-more .dock-sec {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: start;
+  margin: 0;
+}
+.dock-more .dock-sec + .dock-sec {
+  margin-top: 0;
+}
+.dock-more .dock-sec .ib-btn,
+.dock-more .dock-sec .ib-btn.wz-open,
+.dock-more .dock-sec .ib-btn.qm {
+  width: 100%;
+  min-width: 0;
+  flex: 0 0 auto;
+  min-height: 36px;
+}
+.dock-more .dock-sec-end {
+  grid-column: auto;
+}
+@media (max-width: 900px) {
+  .composer-main {
+    min-width: min(420px, 58vw);
+  }
+  .dock-more {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+@media (max-width: 640px) {
+  .composer-main {
+    min-width: 0;
+  }
+  .dock-more {
+    width: 100%;
+    max-width: none;
+    margin-inline: 0;
+    max-height: min(40vh, 320px);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    padding: 9px;
+  }
+  .dock-more .dock-sec .ib-btn {
+    min-height: 42px;
+  }
+}

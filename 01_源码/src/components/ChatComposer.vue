@@ -1,6 +1,6 @@
 <script setup>
 // v3.8.196 6B·ChatPage 拆分：输入区+提问助手 子组件
-import { toRefs, ref, onBeforeUnmount } from 'vue'
+import { toRefs, ref, onMounted, onBeforeUnmount } from 'vue'
 const props = defineProps({ ctx: { type: Object, required: true } })
 const {
   ask,
@@ -60,7 +60,7 @@ function onComposerInput() {
 }
 function openCommands() {
   commandOpen.value = true
-  nextTick.value(() => { const el = document.querySelector('.input-bar textarea'); if (el) el.focus() })
+  nextTick.value(() => { const el = sourceRef.value; if (el) el.focus() })
 }
 function pickCommand(c) {
   if (!c) return
@@ -75,18 +75,44 @@ function pickCommand(c) {
 // 输入工具栏：纵向弹出（失焦自动收回为 »）
 const toolsOpen = ref(false)
 let toolsBlurTimer = null
-function openTools() { clearTimeout(toolsBlurTimer); toolsOpen.value = true }
-function scheduleCloseTools() { clearTimeout(toolsBlurTimer); toolsBlurTimer = setTimeout(() => { toolsOpen.value = false }, 240) }
-function toggleTools() { clearTimeout(toolsBlurTimer); toolsOpen.value = !toolsOpen.value }
+function keepLatestVisible() {
+  nextTick.value(() => {
+    try { if (props.ctx.atBottom && typeof props.ctx.scroll === 'function') props.ctx.scroll() } catch (e) {}
+  })
+}
+function openTools() {
+  clearTimeout(toolsBlurTimer)
+  const wasOpen = toolsOpen.value
+  toolsOpen.value = true
+  if (!wasOpen) keepLatestVisible()
+}
+function closeTools() { clearTimeout(toolsBlurTimer); toolsOpen.value = false }
+function scheduleCloseTools() { clearTimeout(toolsBlurTimer); toolsBlurTimer = setTimeout(closeTools, 240) }
+function toggleTools() {
+  clearTimeout(toolsBlurTimer)
+  toolsOpen.value = !toolsOpen.value
+  if (toolsOpen.value) keepLatestVisible()
+}
+function onComposerPointerDown(e) {
+  const root = sourceRef.value && sourceRef.value.closest && sourceRef.value.closest('.e-dock')
+  if (root && root.contains(e.target)) return
+  commandOpen.value = false
+  closeTools()
+}
 function clearDraft() {
   text.value = ''
   if (Array.isArray(imgs.value)) imgs.value.splice(0)
   linkShow.value = false
   linkUrl.value = ''
+  commandOpen.value = false
   try { localStorage.removeItem('xc_chat_draft') } catch (e) {}
   nextTick.value(() => autoGrow())
 }
-onBeforeUnmount(() => clearTimeout(toolsBlurTimer))
+onMounted(() => document.addEventListener('pointerdown', onComposerPointerDown, true))
+onBeforeUnmount(() => {
+  document.removeEventListener('pointerdown', onComposerPointerDown, true)
+  clearTimeout(toolsBlurTimer)
+})
 </script>
 
 <template>
@@ -120,7 +146,7 @@ onBeforeUnmount(() => clearTimeout(toolsBlurTimer))
       </div>
       <div class="input-bar">
         <div class="e-dock">
-          <div v-if="commandOpen" class="cmd-menu" @mousedown.prevent>
+          <div v-if="commandOpen" class="cmd-menu" role="menu" aria-label="快捷指令" @mousedown.prevent>
             <div class="cmd-hd"><b>/ 快捷指令</b><span>选择后可直接修改再发送</span></div>
             <button v-for="c in COMMANDS" :key="c.id" class="cmd-item" @click="pickCommand(c)">
               <span class="cmd-ic">{{ c.ic }}</span><span class="cmd-tx"><b>{{ c.label }}</b><em>{{ c.desc }}</em></span><span class="cmd-arrow">›</span>
@@ -137,13 +163,15 @@ onBeforeUnmount(() => clearTimeout(toolsBlurTimer))
               v-model="text"
               rows="2"
               :placeholder="inputPh"
+              :aria-label="inputPh"
               @input="onComposerInput"
               @focus="openTools()"
               @blur="scheduleCloseTools()"
+              @keydown.esc.stop.prevent="closeTools()"
               @keydown.enter.exact.prevent="send()"
             ></textarea>
           </div>
-          <div v-if="toolsOpen" class="dock-more" @mousedown.prevent>
+          <div v-if="toolsOpen" id="chat-composer-tools" class="dock-more" role="region" aria-label="输入工具" @mousedown.prevent @keydown.esc.stop.prevent="closeTools()">
           <div class="dock-hd">
             <b>输入工具</b>
             <span>{{ quickMode ? '⚡ 快答' : '🧠 深度' }} · {{ store.cfg.ttsOn !== false ? '自动朗读' : '仅手动朗读' }}</span>
@@ -182,7 +210,7 @@ onBeforeUnmount(() => clearTimeout(toolsBlurTimer))
           </div>
           </div>
           <div class="dock-btns">
-          <button class="ib-btn dock-toggle" :class="{ open: toolsOpen }" title="输入工具栏（展开/收起）" @mousedown.prevent="toggleTools()">»</button>
+          <button class="ib-btn dock-toggle" :class="{ open: toolsOpen }" title="输入工具栏（展开/收起）" :aria-expanded="toolsOpen" aria-controls="chat-composer-tools" @mousedown.prevent="toggleTools()">»</button>
           </div>
           <button
             v-if="store.busy"

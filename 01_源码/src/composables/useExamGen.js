@@ -12,7 +12,8 @@ import { genZlChartGroup } from '../utils/zlChartGroup' // 实测反馈：图形
 import { verifyTruthTable } from '../utils/logicVerify'
 import { canLocalStrat, localFirstFreeOk } from '../data/genStrategy' // P3-2 本地/AI 生成策略表（只读表不写死）
 import { localQuizVerify } from '../utils/quizVerify'
-import { plateChecks, plateAiHint, plateLearn } from '../utils/quizVerifyProfiles'
+import { plateAiHint, plateLearn } from '../utils/quizVerifyProfiles'
+import { validateGeneratedQuestion } from '../utils/questionFactory'
 import { recordGenLog, genLogHint, recentGenStats } from '../utils/quizLog' // 35号批次5(2/3)：出卷质量报告
 import { figCfg } from '../api/figEnhance'
 import { diffCurve } from '../api/professor'
@@ -439,10 +440,9 @@ export function useExamGen(ctx) {
           cur = parseQuiz(raw)
         }
         if (!cur || !cur.options || cur.options.length < 4) { fixHint = '。上一版格式不合格：必须输出题干 + 4 个选项（A./B./C./D.）+ 单独一行【正确答案】X，（解析/设计说明本次不需要，稍后单独生成）'; continue }
-        // 本地唯一单选质检（确定性 skill）：通用硬规则 + 本板块/题型「质检子命题人」专属检查
-        const lv = localQuizVerify(cur, item.subject)
-        const plateErr = plateChecks(cur, item.subject, variant)
-        const allErr = [...(lv.ok ? [] : [lv.reason]), ...plateErr]
+        // 本地唯一单选质检（确定性 skill）：统一题模 + 通用硬规则 + 板块/题型专属检查
+        const factoryCheck = validateGeneratedQuestion(cur, item.subject, variant)
+        const allErr = factoryCheck.errors || []
         // 优化④配图强校验：图形推理 题干+选项必须含合法 SVG（无图/坏图不入卷）
         const _figIssue = (item.subject === '图形推理') ? (() => {
           const ft = String(cur.stem || '') + ' ' + (cur.options || []).map((o) => String((o && o.t) || '')).join(' ')

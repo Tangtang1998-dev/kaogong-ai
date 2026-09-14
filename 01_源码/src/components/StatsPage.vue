@@ -2,7 +2,8 @@
 import { ref, computed, watch, nextTick, onUnmounted } from 'vue'
 import { store, saveCfg } from '../store'
 import { detectBanKuai, chatOnce } from '../api'
-import { todaySeconds, totalSeconds, fmtMin, studyTick, studyMap } from '../utils/study'
+import { studyTick, studyMap } from '../utils/study'
+import { buildLearningProfile } from '../utils/learningCore'
 import { downloadText } from '../utils/export'
 import { showToast } from '../utils/toast'
 import { safeGet, KEYS } from '../utils/storage'
@@ -90,8 +91,9 @@ const seriesMeta = [
   { k: 'review', label: '复盘', color: '#34d399' }
 ]
 // 学习时长
-const todayMin = computed(() => { studyTick.value; return fmtMin(todaySeconds()) })
-const totalMin = computed(() => { studyTick.value; return fmtMin(totalSeconds()) })
+const coreProfile = computed(() => buildLearningProfile({ msgs: store.msgs, wqs: store.wqs, attempts: readAttempts(), study: studyMap() }))
+const todayMin = computed(() => { studyTick.value; return coreProfile.value.study.todayMinutes })
+const totalMin = computed(() => { studyTick.value; return coreProfile.value.study.totalMinutes })
 const trend = computed(() => {
   const days = []
   const now = new Date()

@@ -2464,6 +2464,10 @@ onMounted(() => {
 })
 onUnmounted(() => evOff('xc-ask', onAsk))
 onUnmounted(() => {
+  if (_askT) { clearTimeout(_askT); _askT = null }
+  if (draftTimer) { clearTimeout(draftTimer); draftTimer = null }
+  if (selTimer) { clearTimeout(selTimer); selTimer = null }
+  if (hlTimer) { clearTimeout(hlTimer); hlTimer = null }
   window.removeEventListener('resize', clampBl)
   evOff('xc-open-exam', onOpenExam)
   evOff('xc-open-paper-data', onOpenPaperData)

@@ -139,13 +139,20 @@ function reClampFab() {
   clampFab(gFab.value)
   try { localStorage.setItem('xc_global_fab', JSON.stringify(gFab.value)) } catch (e) {}
 }
-const onOrient = () => setTimeout(reClampFab, 250)
+let orientTimer = null
+let initialClampTimer = null
+const onOrient = () => {
+  if (orientTimer) clearTimeout(orientTimer)
+  orientTimer = setTimeout(reClampFab, 250)
+}
 onMounted(() => {
   window.addEventListener('resize', reClampFab)
   window.addEventListener('orientationchange', onOrient)
-  setTimeout(reClampFab, 600) // 移动端浏览器顶栏收起/首帧布局后，再钳一次保证可见
+  initialClampTimer = setTimeout(reClampFab, 600) // 移动端浏览器顶栏收起/首帧布局后，再钳一次保证可见
 })
 onUnmounted(() => {
+  if (orientTimer) clearTimeout(orientTimer)
+  if (initialClampTimer) clearTimeout(initialClampTimer)
   window.removeEventListener('resize', reClampFab)
   window.removeEventListener('orientationchange', onOrient)
 })
@@ -910,7 +917,9 @@ function clampFloatPos() {
     petPanelPos.value = floatSafeClamp(petPanelPos.value.x, petPanelPos.value.y, panelW, panelH, vw, vh, ts)
   }
 }
-window.addEventListener('resize', () => clampFloatPos())
+function onViewportResize() { clampFloatPos() }
+function onExportKb() { openExp('kb') }
+window.addEventListener('resize', onViewportResize)
 const petPanelPos = ref(null) // 助理小窗位置
 const petCollapsed = ref(false)
 const petPanelFull = ref(false)
@@ -2468,15 +2477,17 @@ onMounted(() => {
   window.addEventListener('keydown', onKey)
   startStudyTrack()
   try { if (!localStorage.getItem('xc_onboarded')) { startOnboard() } } catch (e) {}
-  window.addEventListener('xc-export-kb', () => openExp('kb'))
+  window.addEventListener('xc-export-kb', onExportKb)
   window.addEventListener('popstate', onPopState)
   window.addEventListener('hashchange', onHashChange)
 })
 onUnmounted(() => {
+  if (wallTimer) { clearInterval(wallTimer); wallTimer = null }
   if (syncTimer) { clearInterval(syncTimer); syncTimer = null }
   if (cloudApplyTimer) { clearTimeout(cloudApplyTimer); cloudApplyTimer = null }
   window.removeEventListener('keydown', onKey)
-  window.removeEventListener('xc-export-kb', () => openExp('kb'))
+  window.removeEventListener('resize', onViewportResize)
+  window.removeEventListener('xc-export-kb', onExportKb)
   window.removeEventListener('popstate', onPopState)
   window.removeEventListener('hashchange', onHashChange)
   stopStudyTrack()
@@ -3693,9 +3704,9 @@ onUnmounted(() => {
             <span v-else>声音跟随「🗣️ 语音」里的<b>全局音色</b>（想给 TA 专属原声，用下方「🎤 克隆角色原声」）</span>
           </div>
           <div v-if="petIsLocked(petSkin.id)" class="fld" style="border: 1px dashed rgba(52, 211, 153, 0.45); background: rgba(52, 211, 153, 0.05); border-radius: 10px; padding: 10px">
-            <label style="font-weight: 700">🔗 绑定已有克隆声线（不重新克隆 · 不花钱）</label>
+            <label style="font-weight: 700">🔗 可选：替换该角色默认声线（不重新克隆 · 不花钱）</label>
             <div style="font-size: calc(11px * var(--ui-fs-scale, 1)); color: var(--text3); margin: 4px 0">
-              你之前在智谱克隆过的音色会出现在下面的列表里，选一个直接绑定给『{{ petSkin.char }}』即可——和薛神、李星云那种内置克隆原声是<b>同一套逻辑</b>，切到这个角色就用它朗读。
+              内置角色已经默认绑定各自声线，<b>无需任何操作</b>。只有当你确实想换成自己以前克隆过的音色时，才需要从下面选择并绑定；不选就继续用默认声线。
             </div>
             <div style="display: flex; gap: 6px; flex-wrap: wrap; align-items: center">
               <select v-model="builtinVoicePick" style="font-size: calc(12px * var(--ui-fs-scale, 1)); max-width: 240px">

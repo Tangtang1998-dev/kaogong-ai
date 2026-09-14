@@ -4,6 +4,7 @@
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { isNativeHost, nativePickFolder } from '../utils/platform'
 import { showToast } from '../utils/toast'
+import { resolveContentItem, verifyContentIntegrity } from '../utils/contentManifest'
 
 defineEmits(['close'])
 const props = defineProps({ initialFile: { type: String, default: '' } })
@@ -30,13 +31,7 @@ async function readBundledAsset(rel) {
 }
 async function loadBundle() {
   msg.value = ''
-  const urls = [
-    './zhenti-pdf/index.json',
-    'https://kaogong-ai.pages.dev/zhenti-pdf/index.json',
-    'https://cdn.jsdelivr.net/gh/ly7638714/kaogong-ai@main/01_%E6%BA%90%E7%A0%81/public/zhenti-pdf/index.json',
-    'https://raw.githubusercontent.com/ly7638714/kaogong-ai/main/01_%E6%BA%90%E7%A0%81/public/zhenti-pdf/index.json',
-    'https://gitee.com/KKAALY13/kaogong-ai/raw/main/01_%E6%BA%90%E7%A0%81/public/zhenti-pdf/index.json'
-  ]
+  const urls = resolveContentItem('index.json').candidates.map((c) => c.url)
   try {
     let j = null
     const errs = []
@@ -151,6 +146,7 @@ async function openOnline(gname, fname) {
     }
     const rel = fileRel(gname, fname).split('/').map(encodeURIComponent).join('/')
     const buf = await fetchFirstOk(rel)
+    try { await verifyContentIntegrity(buf, {}) } catch (e) {}
     await loadPdfData(fname, buf)
     try { window.xcnative.cacheSave(cname, bufToB64(buf)) } catch (e) {} // 打开即缓存，下次离线可用
   } catch (e) { msg.value = '在线加载失败：' + (e && e.message || e) + '\n可先用「缓存全部」或离线包，再重试。' }

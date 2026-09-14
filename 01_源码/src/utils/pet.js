@@ -137,6 +137,22 @@ const SKIN_DASH_VOICE = {
 }
 // 新增内置公考角色：形象/人设/参考原声随包内置；实时朗读使用对应引擎的官方声线映射。
 const SKIN_PRESET_VOICES = {
+  xueshen: {
+    name: '薛神内置声线',
+    voices: { glm: '9e3957f5-74b0-5efa-b1fa-6894fdb7e45f', edge: 'zh-CN-YunjianNeural', dash: 'Neil', openai: 'onyx' }
+  },
+  zhangruonan: {
+    name: '章若楠内置声线',
+    voices: { glm: '83eac18d-fd6a-531b-9a71-67b0e6d340ee', edge: 'zh-CN-XiaoxiaoNeural', dash: 'Serena', openai: 'nova' }
+  },
+  lixingyun: {
+    name: '李星云内置声线',
+    voices: { glm: 'a6d7ba90-7cd6-5ef6-9f37-d259112f8be1', edge: 'zh-CN-YunxiNeural', dash: 'Moon', openai: 'echo' }
+  },
+  jiruxue: {
+    name: '姬如雪内置声线',
+    voices: { glm: '18a24e59-6e8c-57bd-aeb8-6584c7a7ada2', edge: 'zh-CN-XiaoyiNeural', dash: 'Chelsie', openai: 'shimmer' }
+  },
   huasheng13: {
     name: '花生十三内置声线', sample: './pet-voices/huasheng13.mp3',
     voices: { glm: 'douxin', edge: 'zh-CN-YunjianNeural', dash: 'Neil', openai: 'onyx' }
@@ -207,8 +223,11 @@ export function petSkinVoiceOf(skinId, engine) {
     if (bv.engine === 'dash' && bv.voiceCustom) out.voiceCustom = bv.voiceCustom
     return out
   }
-  // 皮肤自带的大模型克隆声线（如薛神）同样按克隆声线处理
-  if (s && s.voice && s.voice.clonedVoice) return { engine: s.voice.engine, voice: s.voice.voice, name: s.voice.name || '', model: s.voice.model || '', cloned: true }
+  // 皮肤自带的大模型克隆声线（如薛神）优先按克隆声线处理；未配好对应引擎时，退回下方免费 Edge 兜底，
+  // 让新用户不填 Key 也能听到每个角色的专属声线，而不是退回全局系统音色。
+  if (s && s.voice && s.voice.clonedVoice && presetEngineReady(s.voice.engine || 'glm')) {
+    return { engine: s.voice.engine || 'glm', voice: s.voice.voice, name: s.voice.name || '', model: s.voice.model || '', cloned: true }
+  }
   // 新增内置公考角色：按当前可用引擎自动选声线；没有付费 Key 时优先使用免费 Edge。
   const preset = s && SKIN_PRESET_VOICES[s.id]
   if (preset) {

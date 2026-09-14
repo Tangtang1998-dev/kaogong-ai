@@ -25,6 +25,7 @@ export const KEYS = {
   BL_POS: 'xc_bl_pos', ONBOARDED: 'xc_onboarded', GUIDED: 'xc_guided',
   GUIDES_OFF: 'xc_guides_off',
   PENDING_PAPER: 'xc_pending_paper' // 组卷断点续出：完整性拦截/中途中断后保留的成功题草稿
+  , LESSON_PROGRESS: 'xc_lesson_progress'
 }
 export function safeGet(key, fallback) {
   try {

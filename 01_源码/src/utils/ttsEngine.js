@@ -1686,7 +1686,7 @@ function guardWarnIfNear() {
     const now = Date.now()
     if (now - _guardWarnAt < 300000) return
     _guardWarnAt = now
-    showToast('⚠️ 今日真人朗读已用 ' + Math.round(used / cap * 100) + '%（' + used + '/' + cap + ' 字），即将自动切换为免费系统语音', 'info')
+    showToast('⚠️ 今日付费真人朗读已用 ' + Math.round(used / cap * 100) + '%（' + used + '/' + cap + ' 字），即将自动切换为免费 Edge 真人神经音色', 'info')
   } catch (e) {}
 }
 function ttsAddForEngine(chars) { ttsAddChars(chars) }

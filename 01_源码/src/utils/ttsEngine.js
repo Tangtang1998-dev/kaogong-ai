@@ -66,12 +66,25 @@ export async function slideSynthesize(chunks, worker, onChunk, W = 5) {
   return { bytesAll, firstErr }
 }
 // ============ 统一音频播放器（一次只播一个）============
-let _player = { audio: null, url: '' }
+let _player = { audio: null, url: '', timer: null }
 const SILENT_WAV = 'data:audio/wav;base64,UklGRiYAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQIAAAAAAA=='
+// 【v3.8.354 手机端修复 R2】播放完成超时护栏。
+// HTMLAudio / Web Audio 都有「play() 成功但既不派发 ended 也不派发 error」的真实机型：
+//   · 中低端安卓解码 blob 后元数据未就绪；· iOS PWA 从后台切回；· 音频极短（<50ms）播放器直接跳完不派发 ended。
+// 没有护栏时 Promise 永久挂起 → 调用方 await 卡死 → 整个朗读链僵死。这里统一兜底。
+const PLAY_FALLBACK_MS = 8000
+function playGuardMs(audio, fallbackMs = PLAY_FALLBACK_MS) {
+  try {
+    const d = Number(audio && audio.duration)
+    if (isFinite(d) && d > 0) return Math.max(1500, Math.min(60000, Math.round(d * 1000) + 1200))
+  } catch (e) {}
+  return fallbackMs
+}
 export function stopPlayback() {
   if (_player.audio) {
     try { _player.audio.onended = null; _player.audio.onerror = null; _player.audio.pause() } catch (e) {}
   }
+  if (_player.timer) { try { clearTimeout(_player.timer) } catch (e) {} _player.timer = null }
   if (_player.url) { try { URL.revokeObjectURL(_player.url) } catch (e) {} }
   _player.url = ''
 }
@@ -94,11 +107,20 @@ export function playBytes(bytes, mime) {
       const audio = _player.audio || (_player.audio = new Audio())
       audio.__xcPrimeToken = (audio.__xcPrimeToken || 0) + 1 // 取消静音解锁回调，避免它暂停刚接上的真实音频
       _player.url = url
-      audio.onended = () => { stopPlayback(); resolve(true) }
-      audio.onerror = () => { stopPlayback(); resolve(false) }
+      let settled = false
+      const finish = (ok) => {
+        if (settled) return
+        settled = true
+        stopPlayback()
+        resolve(ok)
+      }
+      audio.onended = () => finish(true)
+      audio.onerror = () => finish(false)
       audio.muted = false
       audio.src = url
-      audio.play().catch(() => { stopPlayback(); resolve(false) })
+      try { audio.load() } catch (e) {}
+      _player.timer = setTimeout(() => finish(true), playGuardMs(audio)) // 兜底：无 ended/error 也要唤醒调用方
+      audio.play().catch(() => finish(false))
     } catch (e) {
       stopPlayback()
       resolve(false)
@@ -147,9 +169,10 @@ function primeAudioElement(audio) {
 // 智谱 GLM-TTS 的 WAV 结构特殊：data 块前有 AIGC/LIST 元数据块（data 块标记是 AIGC 不是 data），
 // 且每段音频开头都有“嘟嘟 叮叮”纯音提示音。这里统一：①按块解析出真正的 data；②去掉开头纯音与静音；
 // ③去掉结尾静音；④淡入淡出；⑤重建为标准 WAV（丢弃元数据）。
-const _sp = { q: [], playing: false, audio: null, url: '', endCb: null, errCb: null }
+const _sp = { q: [], playing: false, audio: null, url: '', endCb: null, errCb: null, timer: null }
 export function spClean() {
   if (_sp.url) { try { URL.revokeObjectURL(_sp.url) } catch (e) {} _sp.url = '' }
+  if (_sp.timer) { try { clearTimeout(_sp.timer) } catch (e) {} _sp.timer = null }
   const a = _sp.audio
   if (a) {
     try { a.onended = null; a.onerror = null } catch (e) {}
@@ -169,25 +192,29 @@ export function spNext() {
     a.__xcPrimeToken = (a.__xcPrimeToken || 0) + 1 // 真实分段开始后，旧解锁回调不得再触碰该元素
     _sp.audio = a; _sp.url = url
     a.muted = false // 静音只用于解锁；真实音频必须明确取消静音，否则手机端会“有播放器但没声音”
-    a.onended = () => {
+    // 【v3.8.354 手机端修复 R2】分段播放同样加超时护栏，避免整条队列卡在第一段
+    let settled = false
+    const settle = (ok) => {
+      if (settled) return
+      settled = true
+      if (_sp.timer) { try { clearTimeout(_sp.timer) } catch (e) {} _sp.timer = null }
       spClean(); _sp.playing = false
+      if (!ok) {
+        if (_sp.errCb) { const cb = _sp.errCb; _sp.endCb = null; _sp.errCb = null; cb() }
+        else spNext()
+        return
+      }
       if (!_sp.q.length && _sp.endCb) { const cb = _sp.endCb; _sp.endCb = null; _sp.errCb = null; cb() }
       else spNext()
     }
-    a.onerror = () => {
-      spClean(); _sp.playing = false
-      if (_sp.errCb) { const cb = _sp.errCb; _sp.endCb = null; _sp.errCb = null; cb() }
-      else spNext()
-    }
+    a.onended = () => settle(true)
+    a.onerror = () => settle(false)
     a.src = url
     // Android WebView 在复用元素时，若只改 src 立即 play()，偶发仍播放上一段静音解锁音频。
     // 显式 load() 让媒体栈同步切到本段 Blob，再开始播放。
     try { a.load() } catch (e) {}
-    a.play().catch(() => {
-      spClean(); _sp.playing = false
-      if (_sp.errCb) { const cb = _sp.errCb; _sp.endCb = null; _sp.errCb = null; cb() }
-      else spNext()
-    })
+    _sp.timer = setTimeout(() => settle(true), playGuardMs(a))
+    a.play().catch(() => settle(false))
   } catch (e) {
     _sp.playing = false
     if (_sp.errCb) { const cb = _sp.errCb; _sp.endCb = null; _sp.errCb = null; cb() }
@@ -210,13 +237,24 @@ export function spSetCallbacks(endCb, errCb) { _sp.endCb = endCb; _sp.errCb = er
 // ============ 无缝流式播放器（Web Audio 精确调度，采样点级无缝，零卡顿）============
 // 旧播放器每个分块单独建 Audio 元素，块间切换有加载/启动空隙 → 感觉卡顿。
 // 这里把每个分块解码成 AudioBuffer，按 ctx.currentTime 时间轴首尾精确衔接播放，像真人说话一样无缝隙。
-let _gap = { ctx: null, started: false, nextAt: 0, queue: [], sources: [], active: 0, stopping: false, endCb: null, errCb: null, fallback: false, token: 0, synthRate: 1, playbackRate: 1 }
+let _gap = { ctx: null, started: false, nextAt: 0, queue: [], sources: [], active: 0, stopping: false, endCb: null, errCb: null, fallback: false, failStreak: 0, token: 0, synthRate: 1, playbackRate: 1 }
+// 【v3.8.354 手机端修复 R3】安卓 App 内页面跑在 file:///android_asset/www/ 下（MainActivity.kt:92），
+// 底层是 Chromium 110（compat.js 为它补过 Promise.withResolvers）。
+// 该环境下 Web Audio 的 decodeAudioData 对 Blob 的 MP3/WAV 支持面明显窄于桌面，
+// 反复尝试只会白白耗 CPU 并拖慢首句。这里直接判定 file:// → 跳过 Web Audio，走 <audio> 队列。
+function isFileProtocol() {
+  try { return typeof location !== 'undefined' && location.protocol === 'file:' } catch (e) { return false }
+}
+// 连续失败 2 次才锁定本轮降级；不再像过去那样「失败一次就永久 fallback」，
+// 避免一次网络抖动/解码抖动就让整场朗读都丢掉无缝效果。
+const GAP_FAIL_LIMIT = 2
 // 解码串行链：decodeAudioData 是异步的，多个分块若并发解码会乱序完成，
 // 导致「后一块先开播、前一块解码完又叠加上来」（上一句没读完就响下一句）。
 // 用 promise 链把「解码+调度」严格串行化，保证永远按分块顺序无缝衔接。
 let _gapChain = Promise.resolve()
 function gapCtx() {
   if (_gap.ctx) return _gap.ctx
+  if (isFileProtocol()) { _gap.fallback = true; return null }
   try {
     const AC = window.AudioContext || window.webkitAudioContext
     if (!AC) { _gap.fallback = true; return null }
@@ -225,6 +263,7 @@ function gapCtx() {
   return _gap.ctx
 }
 export function gapAvailable() {
+  if (isFileProtocol()) return false // 安卓 App 内直接用 <audio> 队列，省掉必然失败的解码尝试
   return !!(window.AudioContext || window.webkitAudioContext)
 }
 // 在用户手势内同步创建/恢复 AudioContext（保证 gapless 能出声；异步创建会被浏览器挂起为 suspended）
@@ -263,15 +302,20 @@ export function gaplessEnqueue(bytes, _mime, meta) {
 // 解码（并行）：Web Audio 直接解码原始字节，裁剪统一交给 applyLeadTrim 单一判据。
 // 【v3.8.332】不再前置 smoothWavBytes：它的 zcr/crest 判据会误裁正常人声开头（实测 200ms），
 // 且与 detectLeadArtifact 判据不同源，造成同一段音频两套结论。
+// 【v3.8.354 R3】降级改为「连续失败计数」：单次抖动不再永久锁死 Web Audio；
+//                安卓 file:// 下 gapCtx() 已直接置 fallback，这里稳定返回 null → 交给 <audio> 队列。
 async function gapDecode(bytes) {
   try {
     const ctx = gapCtx()
-    if (!ctx || _gap.fallback) { _gap.fallback = true; return null }
+    if (!ctx || _gap.fallback) return null
     if (ctx.state === 'suspended') { try { await ctx.resume() } catch (e) {} }
-    if (ctx.state !== 'running') { _gap.fallback = true; return null }
+    if (ctx.state !== 'running') { _gap.failStreak++; if (_gap.failStreak >= GAP_FAIL_LIMIT) _gap.fallback = true; return null }
     const decoded = await ctx.decodeAudioData(gapBytes(bytes).slice(0))
+    _gap.failStreak = 0 // 成功即清零，下一次仍愿意尝试无缝播放
     return applyLeadTrim(ctx, decoded)
   } catch (e) {
+    _gap.failStreak++
+    if (_gap.failStreak >= GAP_FAIL_LIMIT) _gap.fallback = true // 连续失败才锁定本轮降级
     return null
   }
 }
@@ -607,6 +651,12 @@ function gapStart(audioBuf, meta) {
     }
   } catch (e) {
     _gap.active = Math.max(0, _gap.active - 1)
+    if (_gap.active <= 0 && _gap.errCb && !_gap.stopping) {
+      const cb = _gap.errCb
+      _gap.endCb = null
+      _gap.errCb = null
+      try { cb() } catch (_) {}
+    }
   }
 }
 export function gaplessStop() {
@@ -627,6 +677,7 @@ export function gaplessStop() {
   _gap.errCb = null
   _gap.stopping = false
   _gap.fallback = false
+  _gap.failStreak = 0
   _gap.synthRate = 1
   _gap.playbackRate = 1
   resetLeadMemo() // 新一轮朗读重新识别提示音长度，不把上一次的结论带到别的引擎/音色
@@ -635,6 +686,20 @@ export function gaplessPlaying() {
   return !!(_gap.ctx && _gap.ctx.state === 'running' && _gap.active > 0)
 }
 export function gaplessSetCallbacks(endCb, errCb) { _gap.endCb = endCb; _gap.errCb = errCb }
+// 【v3.8.354】无缝播放器内部状态快照：用于移动端真机排查
+// （file:// 是否已降级、连续失败计数、当前是否出声），不影响任何播放行为。
+export function gapDebug() {
+  return {
+    available: gapAvailable(),
+    fileProtocol: isFileProtocol(),
+    fallback: !!_gap.fallback,
+    failStreak: _gap.failStreak,
+    hasCtx: !!_gap.ctx,
+    ctxState: _gap.ctx ? _gap.ctx.state : null,
+    active: _gap.active,
+    queued: _gap.queue.length
+  }
+}
 // 朗读中实时变速：按「新倍速 / 合成倍速」调整当前音频元素的播放速率。
 export function setGaplessRate(rate) {
   const next = clampSpeed(rate)
@@ -1477,29 +1542,76 @@ export function edgeSynthesize(text, opts = {}) {
   })
 }
 
-// ============ ④ 系统语音（兜底，保留原逻辑）============
+// ============ ④ 系统语音（兜底）============
+// 【v3.8.354 手机端修复 R1】系统的两条通道（原生桥 / speechSynthesis）都**不保证**回调：
+//   · 安卓原生 TextToSpeech 的 onDone 过去没有回传 JS 的通道（XcBridge 只报告「已下发」）；
+//   · iOS/手机浏览器的 speechSynthesis 在部分时机既不派发 onend 也不派发 onerror。
+// 一旦 onEnd 丢失，ChatPage.drainAutoSpeech 的 _autoSpeechBusy 永不释放 →
+// 「第一句读了、后面全哑」「按钮永远显示播放中」。
+// 因此这里补一层**幂等的完成兜底**：谁先到（原生 onDone / utterance onend / 预计时长超时）谁生效，只触发一次。
+let _sysSeq = 0
+let _sysCur = null // { id, done, timer, onEnd, onError }
+// 中文按约 220ms/字估算朗读时长（语速 1.0 基准），再按 rate 折算；下限 1.5s，上限 60s
+function sysEstimateMs(text, rate) {
+  const n = String(text || '').replace(/\s+/g, '').length
+  const r = Math.max(0.5, Math.min(2, Number(rate) || 0.98))
+  return Math.max(1500, Math.min(60000, Math.round((n * 220) / r) + 900))
+}
+// 原生桥回传通道：XcBridge 在 UtteranceProgressListener.onDone/onError 时调用它
+if (typeof window !== 'undefined') {
+  window.__xcTtsDone = (id, status) => {
+    try { sysSettle(id, status !== 'error') } catch (e) {}
+  }
+}
+// 结束一次系统朗读：幂等，只让第一个到达的信号生效
+export function sysSettle(id, ok = true) {
+  const cur = _sysCur
+  if (!cur) return false
+  if (id && cur.id && String(id) !== String(cur.id)) return false // 不是当前这次，忽略
+  if (cur.done) return false
+  cur.done = true
+  if (cur.timer) { try { clearTimeout(cur.timer) } catch (e) {} cur.timer = null }
+  _sysCur = null
+  try {
+    if (ok) { if (cur.onEnd) cur.onEnd() } else if (cur.onError) cur.onError('sys-fail')
+  } catch (e) {}
+  return true
+}
 export function sysSpeak(text, opts = {}) {
   try {
+    const body = cleanSpeechText(text)
+    const rate = Number(opts.rate) || 0.98
+    const id = 'xc-sys-' + ++_sysSeq
+    // 新一次朗读开始时，先把上一次未结束的兜底清掉（避免旧计时器误触发新回调）
+    if (_sysCur && !_sysCur.done) sysSettle(_sysCur.id, false)
+    const cur = { id, done: false, timer: null, onEnd: opts.onEnd, onError: opts.onError }
+    _sysCur = cur
+    // 预计时长兜底：即使引擎完全不回调，也保证调用方被唤醒（移动端头号死锁点）
+    const est = sysEstimateMs(body, rate)
+    cur.timer = setTimeout(() => { if (!cur.done) sysSettle(id, true) }, est + 400)
     // Android 正式版 WebView 没有 speechSynthesis；优先走原生 TTS 兜底，
     // 保证真人引擎失败、缓存解码失败时仍然一定有声音。
     const nat = typeof window !== 'undefined' && window.xcnative
     if (nat && typeof nat.ttsSpeak === 'function') {
-      const ok = nat.ttsSpeak(cleanSpeechText(text), Number(opts.rate) || 0.98, Number(opts.pitch) || 0.98)
+      const ok = nat.ttsSpeak(body, rate, Number(opts.pitch) || 0.98, id)
       if (ok !== false) return true
+      sysSettle(id, false) // 原生拒绝 → 立刻判失败，不留悬挂计时器
     }
-    const u = new SpeechSynthesisUtterance(cleanSpeechText(text))
+    const u = new SpeechSynthesisUtterance(body)
     u.lang = 'zh-CN'
-    u.rate = Number(opts.rate) || 0.98
+    u.rate = rate
     u.pitch = Number(opts.pitch) || 0.98
-    if (opts.onEnd) u.onend = opts.onEnd
-    if (opts.onError) u.onerror = opts.onError
+    u.onend = () => sysSettle(id, true)
+    u.onerror = () => sysSettle(id, false)
     window.speechSynthesis.speak(u)
     return true
   } catch (e) {
+    try { sysSettle(_sysCur && _sysCur.id, false) } catch {}
     return false
   }
 }
 export function sysStop() {
+  try { sysSettle(_sysCur && _sysCur.id, false) } catch (e) {}
   try {
     const nat = typeof window !== 'undefined' && window.xcnative
     if (nat && typeof nat.ttsStop === 'function') nat.ttsStop()
@@ -1659,7 +1771,7 @@ export async function speakPro(text, opts = {}) {
     if (mode === 'dash') {
       // 阿里百炼 Qwen3-TTS：同流式分块，第一块一到就开口（mpeg）
       const r = await dashSynthesize(t, { voice: opts.voice, voiceCustom: opts.voiceCustom, speed: opts.speed, chunkSize, firstChunkSize, pinCache: opts.pinCache === true, onChunk: (buf, text) => enqueueGapless(buf, text, 'audio/mpeg') })
-      return await streamFinish(r, opts)
+      return await finishStreamOrFallback(r, opts, t)
     }
     if (mode === 'edge') {
       // 音频缓存：同一文本+音色+语速只合成一次，命中直接播放（Edge 免费，缓存省网络+避免重复解析；glm 用户若切回，缓存同样省次）
@@ -1669,13 +1781,29 @@ export async function speakPro(text, opts = {}) {
         if (opts.pinCache === true) await ttsCachePin(ck)
         const played = await playBytes(hit.bytes, hit.mime)
         setStatus(played ? 'done' : 'error', played ? '🔁 已从缓存播放（未重复合成）' : '❌ 播放失败（浏览器拦截自动播放）')
-        if (played && opts.onEnd) opts.onEnd()
-        return { ok: played, cached: true }
+        if (played) {
+          if (opts.onEnd) opts.onEnd()
+          return { ok: true, cached: true }
+        }
+        const fallback = sysSpeak(t, { rate: opts.rate, pitch: opts.pitch, onEnd: opts.onEnd, onError: opts.onError })
+        if (fallback) {
+          if (opts.onFallback) opts.onFallback('edge-cache-playback-failed')
+          return { ok: true, fallback: true, cached: true }
+        }
+        if (opts.onError) opts.onError('播放失败')
+        return { ok: false, cached: true }
       }
       const r = await edgeSynthesize(t, { voice: opts.voice || store.cfg.ttsEdgeVoice, rate: opts.rate, pitch: opts.pitch })
       if (r.ok && r.bytes) {
         await ttsCacheSet(ck, r.bytes, r.mime, opts.pinCache === true)
-        return finishSpeak(r, opts)
+        const finished = await finishSpeak(r, opts, true)
+        if (finished.ok) return finished
+        const fallback = sysSpeak(t, { rate: opts.rate, pitch: opts.pitch, onEnd: opts.onEnd, onError: opts.onError })
+        if (fallback) {
+          if (opts.onFallback) opts.onFallback('edge-playback-failed')
+          return { ok: true, fallback: true }
+        }
+        return finished
       }
       // 【v3.8.332】Edge 失败（实测常因 403/网络不通）→ 回退系统语音，保证「一定读得出来」。
       // 原先 Edge 分支无回退，失败就直接静默，用户以为功能坏了。
@@ -1690,13 +1818,30 @@ export async function speakPro(text, opts = {}) {
       return { ok: edgeFallback, msg: r.msg, fallback: true }
     }
     if (mode === 'sys') {
-      const ok = sysSpeak(t, { rate: opts.rate, pitch: opts.pitch, onEnd: opts.onEnd, onError: opts.onError })
-      setStatus(ok ? 'done' : 'error', ok ? '✅ 系统语音播放中' : '❌ 系统语音播放失败')
-      return { ok }
+      // 【v3.8.354 手机端修复 R1】过去这里只 sysSpeak 后立刻 return { ok }，完全不等 onEnd：
+      // 手机端会因此「第一句读完就不再读后面」（_autoSpeechBusy 永不释放）。
+      // 现在与 glm/edge 分支对齐：返回一个在「播完 / 失败 / 预计时长超时」时 settle 的 Promise。
+      return await new Promise((resolve) => {
+        let settled = false
+        const finish = (ok) => {
+          if (settled) return
+          settled = true
+          setStatus(ok ? 'done' : 'error', ok ? '✅ 系统语音播放完成' : '❌ 系统语音播放失败')
+          if (ok) {
+            if (opts.onEnd) opts.onEnd()
+          } else if (opts.onError) {
+            opts.onError('sys-fail')
+          }
+          resolve({ ok })
+        }
+        const ok = sysSpeak(t, { rate: opts.rate, pitch: opts.pitch, onEnd: () => finish(true), onError: () => finish(false) })
+        if (!ok) { finish(false); return }
+        setStatus('speaking', '✅ 系统语音播放中')
+      })
     }
     // 默认 glm：流式分块播放；失败自动回退系统语音，保证「一定读得出来」
     const r = await glmSynthesize(t, { voice: opts.voice, model: opts.model, speed: opts.speed, chunkSize, firstChunkSize, pinCache: opts.pinCache === true, onChunk: (buf, text) => enqueueGapless(buf, text, 'audio/wav') })
-    if (r.ok) return await streamFinish(r, opts)
+    if (r.ok) return await finishStreamOrFallback(r, opts, t)
     setStatus('error', '❌ ' + r.msg)
     const fallback = sysSpeak(t, { rate: opts.rate, pitch: opts.pitch, onEnd: opts.onEnd, onError: opts.onError })
     setStatus(fallback ? 'done' : 'error', fallback ? '⚠️ 真人引擎失败，已回退系统语音' : '❌ 朗读失败')
@@ -1719,7 +1864,10 @@ export async function speakPro(text, opts = {}) {
 }
 // 流式真人引擎失败时也保证出声：本机系统语音接管，且不向调用方抛“网络错误”。
 async function finishStreamOrFallback(r, opts, text) {
-  if (r.ok) return await streamFinish(r, opts)
+  if (r.ok) {
+    const played = await streamFinish(r, opts, text, true)
+    if (played.ok) return played
+  }
   setStatus('error', '❌ ' + (r.msg || '真人语音不可用'))
   const fallback = sysSpeak(text, { rate: opts.rate, pitch: opts.pitch, onEnd: opts.onEnd, onError: opts.onError })
   setStatus(fallback ? 'done' : 'error', fallback ? '⚠️ 真人引擎失败，已回退系统语音' : '❌ 朗读失败')
@@ -1731,7 +1879,7 @@ async function finishStreamOrFallback(r, opts, text) {
   return { ok: fallback, msg: r.msg, fallback: true }
 }
 // 流式完成：等待队列播完（或播放失败）再回调 onEnd/onError
-function streamFinish(r, opts) {
+function streamFinish(r, opts, text = '', deferError = false) {
   if (!r.ok) {
     setStatus('error', '❌ ' + r.msg)
     if (opts.onError) opts.onError(r.msg)
@@ -1739,13 +1887,22 @@ function streamFinish(r, opts) {
   }
   return new Promise((resolve) => {
     let done = false
+    let guard = null
     const finish = (ok) => {
       if (done) return
       done = true
+      if (guard) { try { clearTimeout(guard) } catch (e) {} guard = null }
+      try { gaplessSetCallbacks(null, null) } catch (e) {}
+      try { spSetCallbacks(null, null) } catch (e) {}
       setStatus(ok ? 'done' : 'error', ok ? '✅ 真人音色播放完成' : '❌ 播放失败（浏览器拦截自动播放）')
-      if (opts.onEnd) opts.onEnd()
-      resolve({ ok })
+      if (ok && opts.onEnd) opts.onEnd()
+      if (!ok && !deferError && opts.onError) opts.onError('播放失败')
+      resolve({ ok, playbackFailed: !ok })
     }
+    // 【v3.8.354 手机端修复 R2】总时长护栏：分块队列在极端机型上可能既不结束也不报错，
+    // 没有这层兜底 streamFinish 的 Promise 会永久悬挂。按文本长度估算上限，最少 15s。
+    const estMs = Math.max(15000, Math.min(180000, String(text || '').length * 220 + 5000))
+    guard = setTimeout(() => finish(true), estMs)
     // 【v3.8.332】只给「真正出声的那一套」挂回调，避免两套播放器互相覆盖/重复触发：
     //   · Web Audio 可用时，分块一律走 gapless（enqueueGapless），_sp 不会启用；
     //   · 只有在 gapless 不可用（解码失败/自动播放被拦）时，分块才落到 _sp 队列。
@@ -1753,7 +1910,7 @@ function streamFinish(r, opts) {
     spSetCallbacks(() => finish(true), () => finish(false))
   })
 }
-async function finishSpeak(r, opts) {
+async function finishSpeak(r, opts, deferError = false) {
   if (!r.ok) {
     setStatus('error', '❌ ' + r.msg)
     if (opts.onError) opts.onError(r.msg)
@@ -1761,8 +1918,12 @@ async function finishSpeak(r, opts) {
   }
   const played = await playBytes(r.bytes, r.mime)
   setStatus(played ? 'done' : 'error', played ? '✅ 真人音色播放完成' : '❌ 播放失败（浏览器拦截自动播放）')
-  if (opts.onEnd) opts.onEnd()
-  return { ok: played }
+  if (played) {
+    if (opts.onEnd) opts.onEnd()
+  } else if (!deferError && opts.onError) {
+    opts.onError('播放失败')
+  }
+  return { ok: played, playbackFailed: !played }
 }
 export function stopSpeakPro() {
   _speakPaused = false

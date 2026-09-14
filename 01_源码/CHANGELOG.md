@@ -2,6 +2,20 @@
 
 版本号与 `src/version.js`、`package.json` 三处保持一致，发布时同步递增。
 
+## [3.8.354] — 2026-09-14 · 手机端朗读三处根因修复（只读第一句 / 按钮卡住 / 无缝降级粘滞）
+- **R1 系统语音「只读第一句，之后全哑」**：安卓原生桥此前**完全没实现** `UtteranceProgressListener`，原生 TTS 播完不回传任何事件；iOS `speechSynthesis` 在部分时机也不派发 `onend`/`onerror`。结果是 `speakPro` 的 Promise 永不 resolve，`ChatPage.drainAutoSpeech` 的 `_autoSpeechBusy` 永久为 `true`，后续所有自动朗读被静默丢弃，按钮永远停在「播放中」，永久缓存也从不落盘。
+  - 修复：`XcBridge.kt` 注册 `UtteranceProgressListener`（onDone/onError/onStop），经 `window.__xcTtsDone(id,status)` 回传；`sysSpeak` 把 utteranceId 作为第 4 参数交给原生桥；新增幂等的 `sysSettle(id, ok)`；`speakPro` 的 sys 分支改为**等待真正结束**；再加「按文本长度估算时长」的兜底计时器（1500–60000ms），任何回调缺失都能唤醒调用方。
+- **R2 播放 Promise 永久挂起**：`playBytes` / `spNext` / `streamFinish` 在既无 `onended` 也无 `onerror` 的机型上（中低端安卓 blob 元数据未就绪、iOS PWA 从后台切回、极短音频）会永久挂起——试音按钮卡死、自动朗读队列卡在第一句、缓存永不写入。
+  - 修复：三处统一加超时护栏 `playGuardMs = clamp(duration*1000+1200, 1500, 60000)`，duration 未知时兜底 8000ms；`finish`/`settle` 全部幂等，`spClean`/`stopPlayback` 同步清理计时器。
+- **R3 安卓 file:// 下无缝降级粘滞**：安卓 App 页面跑在 `file:///android_asset/www/`（Chromium 110），Web Audio 的 `decodeAudioData` 对 Blob 的 MP3/WAV 支持面窄于桌面，反复尝试只是白耗 CPU、拖慢首句；且旧逻辑「失败一次就永久锁 fallback」，一次抖动就让整场朗读失去无缝效果。
+  - 修复：`gapAvailable()` 在 `file://` 下直接返回 `false`，跳过必然失败的解码、直接走 `<audio>` 分段队列；`gapDecode` 改为**连续失败计数**（`GAP_FAIL_LIMIT=2`），单次抖动不再锁死，任一成功即清零；`gaplessStop` 复位计数。
+- **R4 分段回退静音与旧音频粘连**：复用同一个已解锁 `<audio>` 时，真实分段继承了静音解锁状态，且部分安卓 WebView 在只改 `src` 后立即 `play()` 会继续播放上一段静音。
+  - 修复：真实分段播放前强制 `muted=false` 并显式 `load()`；`playBytes` 同步补齐；全部播放失败统一进入系统语音兜底，不再把播放失败误判成播放完成。
+- 新增 `gapDebug()` 内部状态快照（`fileProtocol`/`fallback`/`failStreak`/`ctxState` 等），供真机排查用，不影响播放行为。
+- **回归测试**：新增 `ttsMobileSysEnd.test.js`（12）、`ttsMobilePlayTimeout.test.js`（10）、`ttsMobileFileProtocol.test.js`（9）共 **31 个用例**，分别锁死 R1/R2/R3 的修复契约（含 1500/60000ms 边界夹紧、连续失败阈值、幂等结算、id 错配忽略）。
+- 全仓 `146 个测试文件 / 1073 个用例`全部通过，`eslint . --max-warnings=0` 零错误零警告；`ttsEngine.js` 已定向同步到 `06_MobileApp-DeepDev/frontend/`（两仓零差异）。
+- 四端产物（网页正式版 / iOS 试用 PWA / 安卓正式 APK / 安卓试用 APK）统一更新到 3.8.354。
+
 ## [3.8.353] — 2026-09-14 · 安卓朗读真兜底与缓存播放修复
 - 安卓 App 新增原生 `TextToSpeech` 桥接，WebView 没有 `speechSynthesis` 时也能真正使用系统语音兜底。
 - 分段回退播放不再为每一句新建 `<audio>`，改为复用并预先解锁同一个播放器，修复安卓 WebView 播放被拦截。

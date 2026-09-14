@@ -11,6 +11,7 @@ export const SYNC_STATE_KEY = 'xc_sync_state'
 const LOCAL_ONLY_KEYS = new Set([
   'xc_cfg', 'xc_auth', 'xc_auth_verify', 'xc_errlog', 'xc_global_fab',
   'xc_chat_tools', 'xc_onboarded',
+  'xc_composer_collapsed',
   'xc_guided', 'xc_guides_off', 'xc_draft_fab_on', 'xc_draft_opacity',
   'xc_draft_mode', 'xc_draft_size', 'xc_draft_mini_pos', 'xc_weak_toast',
   'xc_wq_due_tip', 'xc_pdf_tree', 'xc_pdf_tree_name', 'xc_pdf_online_order',

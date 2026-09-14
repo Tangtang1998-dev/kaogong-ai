@@ -5867,3 +5867,48 @@ body[data-theme='light'] .tab-order-row { background:#f7faf9; }
     min-height: 42px;
   }
 }
+
+/* ===== v3.8.351 手机输入区折叠：给回复留出更大可视范围 ===== */
+.composer-collapsed-bar {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0 12px;
+  border: 1px solid var(--glass-border);
+  border-radius: 12px;
+  background: rgba(127, 127, 127, .06);
+  cursor: pointer;
+}
+.composer-collapsed-bar span {
+  flex: 0 0 auto;
+  color: var(--accent);
+  font-size: calc(13px * var(--ui-fs-scale, 1));
+  font-weight: 800;
+}
+.composer-collapsed-bar em {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text3);
+  font-size: calc(11px * var(--ui-fs-scale, 1));
+  font-style: normal;
+}
+.composer-collapse {
+  width: auto;
+  min-width: 62px;
+  padding: 0 9px;
+  font-size: calc(11.5px * var(--ui-fs-scale, 1));
+  font-weight: 700;
+}
+.e-dock.is-input-collapsed {
+  align-items: center;
+  padding: 5px;
+}
+@media (min-width: 641px) {
+  .composer-collapse { display: none !important; }
+}

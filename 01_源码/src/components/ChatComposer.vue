@@ -1,6 +1,6 @@
 <script setup>
 // v3.8.196 6B·ChatPage 拆分：输入区+提问助手 子组件
-import { toRefs, ref, onMounted, onBeforeUnmount } from 'vue'
+import { toRefs, ref, computed, onMounted, onBeforeUnmount } from 'vue'
 const props = defineProps({ ctx: { type: Object, required: true } })
 const {
   ask,
@@ -31,6 +31,7 @@ const {
   webSearchBusy,
   toggleWebSearch,
   recogOn,
+  isNarrow,
   nextTick,
   openExam,
   showToast
@@ -47,6 +48,10 @@ const COMMANDS = [
 ]
 const commandOpen = ref(false)
 const sourceRef = ref(null)
+const inputCollapsed = ref(false)
+try { inputCollapsed.value = localStorage.getItem('xc_composer_collapsed') === '1' } catch (e) {}
+const effectiveInputCollapsed = computed(() => !!isNarrow.value && inputCollapsed.value)
+const draftPreview = computed(() => String(text.value || '').replace(/\s+/g, ' ').trim().slice(0, 28))
 function autoGrow() {
   const el = sourceRef.value
   if (!el) return
@@ -92,6 +97,19 @@ function toggleTools() {
   clearTimeout(toolsBlurTimer)
   toolsOpen.value = !toolsOpen.value
   if (toolsOpen.value) keepLatestVisible()
+}
+function toggleInputCollapsed() {
+  if (!isNarrow.value) return
+  clearTimeout(toolsBlurTimer)
+  inputCollapsed.value = !inputCollapsed.value
+  if (inputCollapsed.value) {
+    commandOpen.value = false
+    toolsOpen.value = false
+  } else {
+    keepLatestVisible()
+    nextTick.value(() => { if (sourceRef.value) sourceRef.value.focus() })
+  }
+  try { localStorage.setItem('xc_composer_collapsed', inputCollapsed.value ? '1' : '0') } catch (e) {}
 }
 function onComposerPointerDown(e) {
   const root = sourceRef.value && sourceRef.value.closest && sourceRef.value.closest('.e-dock')
@@ -145,14 +163,14 @@ onBeforeUnmount(() => {
         <button class="wz-cancel" @click="wzCancel()">✕ 取消锁定</button>
       </div>
       <div class="input-bar">
-        <div class="e-dock">
+        <div class="e-dock" :class="{ 'is-input-collapsed': effectiveInputCollapsed }">
           <div v-if="commandOpen" class="cmd-menu" role="menu" aria-label="快捷指令" @mousedown.prevent>
             <div class="cmd-hd"><b>/ 快捷指令</b><span>选择后可直接修改再发送</span></div>
             <button v-for="c in COMMANDS" :key="c.id" class="cmd-item" @click="pickCommand(c)">
               <span class="cmd-ic">{{ c.ic }}</span><span class="cmd-tx"><b>{{ c.label }}</b><em>{{ c.desc }}</em></span><span class="cmd-arrow">›</span>
             </button>
           </div>
-          <div class="composer-main">
+          <div v-if="!effectiveInputCollapsed" id="chat-composer-main" class="composer-main">
             <div class="composer-quickbar" aria-label="常用输入功能">
               <span>常用</span>
               <button v-for="c in COMMANDS.slice(0, 4)" :key="c.id" class="cq-btn" @click="pickCommand(c)">{{ c.ic }} {{ c.label }}</button>
@@ -171,7 +189,11 @@ onBeforeUnmount(() => {
               @keydown.enter.exact.prevent="send()"
             ></textarea>
           </div>
-          <div v-if="toolsOpen" id="chat-composer-tools" class="dock-more" role="region" aria-label="输入工具" @mousedown.prevent @keydown.esc.stop.prevent="closeTools()">
+          <div v-else class="composer-collapsed-bar" role="button" tabindex="0" aria-label="展开输入框" @click="toggleInputCollapsed()" @keydown.enter.prevent="toggleInputCollapsed()" @keydown.space.prevent="toggleInputCollapsed()">
+            <span>⌃ 展开输入</span>
+            <em>{{ draftPreview || '点这里继续输入' }}</em>
+          </div>
+          <div v-if="toolsOpen && !effectiveInputCollapsed" id="chat-composer-tools" class="dock-more" role="region" aria-label="输入工具" @mousedown.prevent @keydown.esc.stop.prevent="closeTools()">
           <div class="dock-hd">
             <b>输入工具</b>
             <span>{{ quickMode ? '⚡ 快答' : '🧠 深度' }} · {{ store.cfg.ttsOn !== false ? '自动朗读' : '仅手动朗读' }}</span>
@@ -210,15 +232,16 @@ onBeforeUnmount(() => {
           </div>
           </div>
           <div class="dock-btns">
-          <button class="ib-btn dock-toggle" :class="{ open: toolsOpen }" title="输入工具栏（展开/收起）" :aria-expanded="toolsOpen" aria-controls="chat-composer-tools" @mousedown.prevent="toggleTools()">»</button>
+          <button v-if="isNarrow" class="ib-btn composer-collapse" :title="effectiveInputCollapsed ? '展开输入框' : '收起输入框，给回复更多空间'" :aria-expanded="!effectiveInputCollapsed" aria-controls="chat-composer-main" @mousedown.prevent="toggleInputCollapsed()">{{ effectiveInputCollapsed ? '⌄ 展开' : '⌃ 收起' }}</button>
+          <button v-if="!effectiveInputCollapsed" class="ib-btn dock-toggle" :class="{ open: toolsOpen }" title="输入工具栏（展开/收起）" :aria-expanded="toolsOpen" aria-controls="chat-composer-tools" @mousedown.prevent="toggleTools()">»</button>
           </div>
           <button
-            v-if="store.busy"
+            v-if="!effectiveInputCollapsed && store.busy"
             class="ib-send stop"
             title="停止生成"
             @click="stopGenerate()"
           >⏹</button>
-          <button v-else class="ib-send" @click="send()">➤</button>
+          <button v-else-if="!effectiveInputCollapsed" class="ib-send" @click="send()">➤</button>
         </div>
       </div>
 </template>

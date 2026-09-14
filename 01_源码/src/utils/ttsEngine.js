@@ -92,6 +92,7 @@ export function playBytes(bytes, mime) {
       const blob = new Blob([data], { type: mime || 'audio/mpeg' })
       const url = URL.createObjectURL(blob)
       const audio = _player.audio || (_player.audio = new Audio())
+      audio.__xcPrimeToken = (audio.__xcPrimeToken || 0) + 1 // 取消静音解锁回调，避免它暂停刚接上的真实音频
       _player.url = url
       audio.onended = () => { stopPlayback(); resolve(true) }
       audio.onerror = () => { stopPlayback(); resolve(false) }
@@ -108,14 +109,37 @@ export function playBytes(bytes, mime) {
 // 用复用的 HTMLAudio 元素播放极短静音，给移动端后续异步生成的 TTS 音频留下播放权限。
 export function primePlayback() {
   try {
-    const audio = _player.audio || (_player.audio = new Audio())
+    const list = [_player.audio || (_player.audio = new Audio()), _sp.audio || (_sp.audio = new Audio())]
+    for (const audio of list) primeAudioElement(audio)
+  } catch (e) {}
+}
+
+// 单个 HTMLAudio 的移动端解锁，供统一播放器与分段回退播放器共用。
+function primeAudioElement(audio) {
+  try {
+    if (!audio) return
+    const token = (audio.__xcPrimeToken || 0) + 1
+    audio.__xcPrimeToken = token
+    try {
+      audio.pause()
+      audio.currentTime = 0
+    } catch (e) {}
     audio.muted = true
     audio.src = SILENT_WAV
     const p = audio.play()
     if (p && typeof p.then === 'function') {
-      p.then(() => { try { audio.pause(); audio.currentTime = 0; audio.muted = false } catch (e) {} })
-        .catch(() => { try { audio.muted = false } catch (e) {} })
+      p.catch(() => {})
     }
+    setTimeout(() => {
+      if (audio.__xcPrimeToken !== token) return
+      try {
+        if (audio.src === SILENT_WAV) {
+          audio.pause()
+          audio.currentTime = 0
+        }
+        audio.muted = false
+      } catch (e) {}
+    }, 120)
   } catch (e) {}
 }
 
@@ -126,7 +150,12 @@ export function primePlayback() {
 const _sp = { q: [], playing: false, audio: null, url: '', endCb: null, errCb: null }
 export function spClean() {
   if (_sp.url) { try { URL.revokeObjectURL(_sp.url) } catch (e) {} _sp.url = '' }
-  _sp.audio = null
+  const a = _sp.audio
+  if (a) {
+    try { a.onended = null; a.onerror = null } catch (e) {}
+    try { a.pause() } catch (e) {}
+    try { a.currentTime = 0 } catch (e) {}
+  }
 }
 export function spNext() {
   if (_sp.playing || !_sp.q.length) return
@@ -134,8 +163,12 @@ export function spNext() {
   _sp.playing = true
   try {
     const url = URL.createObjectURL(new Blob([it.bytes], { type: it.mime }))
-    const a = new Audio(url)
+    // 必须复用同一个已由用户手势解锁的 Audio 元素；每段 new Audio()
+    // 在部分 Android WebView / iOS PWA 会被当成新元素拦截并直接报播放失败。
+    const a = _sp.audio || (_sp.audio = new Audio())
+    a.__xcPrimeToken = (a.__xcPrimeToken || 0) + 1 // 真实分段开始后，旧解锁回调不得再触碰该元素
     _sp.audio = a; _sp.url = url
+    a.muted = false // 静音只用于解锁；真实音频必须明确取消静音，否则手机端会“有播放器但没声音”
     a.onended = () => {
       spClean(); _sp.playing = false
       if (!_sp.q.length && _sp.endCb) { const cb = _sp.endCb; _sp.endCb = null; _sp.errCb = null; cb() }
@@ -146,6 +179,10 @@ export function spNext() {
       if (_sp.errCb) { const cb = _sp.errCb; _sp.endCb = null; _sp.errCb = null; cb() }
       else spNext()
     }
+    a.src = url
+    // Android WebView 在复用元素时，若只改 src 立即 play()，偶发仍播放上一段静音解锁音频。
+    // 显式 load() 让媒体栈同步切到本段 Blob，再开始播放。
+    try { a.load() } catch (e) {}
     a.play().catch(() => {
       spClean(); _sp.playing = false
       if (_sp.errCb) { const cb = _sp.errCb; _sp.endCb = null; _sp.errCb = null; cb() }
@@ -1443,6 +1480,13 @@ export function edgeSynthesize(text, opts = {}) {
 // ============ ④ 系统语音（兜底，保留原逻辑）============
 export function sysSpeak(text, opts = {}) {
   try {
+    // Android 正式版 WebView 没有 speechSynthesis；优先走原生 TTS 兜底，
+    // 保证真人引擎失败、缓存解码失败时仍然一定有声音。
+    const nat = typeof window !== 'undefined' && window.xcnative
+    if (nat && typeof nat.ttsSpeak === 'function') {
+      const ok = nat.ttsSpeak(cleanSpeechText(text), Number(opts.rate) || 0.98, Number(opts.pitch) || 0.98)
+      if (ok !== false) return true
+    }
     const u = new SpeechSynthesisUtterance(cleanSpeechText(text))
     u.lang = 'zh-CN'
     u.rate = Number(opts.rate) || 0.98
@@ -1456,9 +1500,17 @@ export function sysSpeak(text, opts = {}) {
   }
 }
 export function sysStop() {
+  try {
+    const nat = typeof window !== 'undefined' && window.xcnative
+    if (nat && typeof nat.ttsStop === 'function') nat.ttsStop()
+  } catch (e) {}
   try { window.speechSynthesis.cancel() } catch (e) {}
 }
 export function sysSpeaking() {
+  try {
+    const nat = typeof window !== 'undefined' && window.xcnative
+    if (nat && typeof nat.ttsSpeaking === 'function') return !!nat.ttsSpeaking()
+  } catch (e) {}
   try { return window.speechSynthesis.speaking || window.speechSynthesis.pending } catch (e) { return false }
 }
 
@@ -1567,6 +1619,7 @@ export async function prefetchTts(text, opts = {}) {
 export async function speakPro(text, opts = {}) {
   stopSpeakPro()
   gapEnsure() // 在调用栈内同步建好 AudioContext（若由点击触发，可保证 running 可出声）
+  primePlayback() // 同时解锁 HTMLAudio，避免 Web Audio 解码失败退回分段播放时被移动端拦截
   gapInitOnGesture()
   _gap.synthRate = clampSpeed(opts.speed != null ? opts.speed : (opts.rate != null ? opts.rate : 1))
   _gap.playbackRate = 1

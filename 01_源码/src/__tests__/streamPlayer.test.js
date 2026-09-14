@@ -37,10 +37,12 @@ describe('流式播放器（边到边播，降低发音滞后）', () => {
     // 播完第一块 → 自动续播第二块
     FakeAudio.instances[0].onended()
     expect(FakeAudio.played.length).toBe(2)
-    FakeAudio.instances[1].onended()
+    // 必须复用同一个已解锁的 Audio 元素，避免移动端每段新建元素后被拦截
+    expect(FakeAudio.instances.length).toBe(1)
+    FakeAudio.instances[0].onended()
     expect(FakeAudio.played.length).toBe(3)
     expect(ended).toBe(0)
-    FakeAudio.instances[2].onended()
+    FakeAudio.instances[0].onended()
     expect(ended).toBe(1)
     expect(spPlaying()).toBe(false)
   })

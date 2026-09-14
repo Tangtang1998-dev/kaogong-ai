@@ -14,6 +14,9 @@ import {
   glmSynthesize,
   openaiSynthesize,
   speakPro,
+  sysSpeak,
+  sysStop,
+  sysSpeaking,
   listGmVoices,
   GLM_PRESET_VOICES,
   EDGE_PRESET_VOICES,
@@ -294,6 +297,26 @@ describe('真人引擎失败回退（回归：不得只弹网络错误而无声�
     expect(onFallback).toHaveBeenCalled()
     expect(onError).not.toHaveBeenCalled()
     expect(spoken.join('')).toContain('这是一段用于验证回退')
+  })
+})
+
+describe('Android WebView 原生 TTS 兜底', () => {
+  afterEach(() => { vi.unstubAllGlobals() })
+
+  it('没有 speechSynthesis 时改走 xcnative.ttsSpeak，并同步停止/状态查询', () => {
+    const calls = { speak: [], stop: 0, speaking: 0 }
+    vi.stubGlobal('window', {
+      xcnative: {
+        ttsSpeak: (text, rate, pitch) => { calls.speak.push({ text, rate, pitch }); return true },
+        ttsStop: () => { calls.stop++ },
+        ttsSpeaking: () => { calls.speaking++; return true }
+      }
+    })
+    expect(sysSpeak('本机兜底朗读', { rate: 1.2, pitch: 0.9 })).toBe(true)
+    expect(calls.speak[0]).toEqual({ text: '本机兜底朗读', rate: 1.2, pitch: 0.9 })
+    expect(sysSpeaking()).toBe(true)
+    sysStop()
+    expect(calls.stop).toBe(1)
   })
 })
 

@@ -1751,6 +1751,8 @@ let _autoSpeechOnDone = null
 let _autoSpeechUsedSegments = []
 let _autoSpeechStoredOpts = null
 let _autoSpeechPrefetchText = ''
+let _autoSpeechUsedFallback = false
+let _autoSpeechRepairTried = false
 
 function snapshotSpeechOpts() {
   const cfg = store.cfg || {}
@@ -1777,6 +1779,8 @@ function resetAutoSpeech(question = '') {
   _autoSpeechUsedSegments = []
   _autoSpeechStoredOpts = null
   _autoSpeechPrefetchText = ''
+  _autoSpeechUsedFallback = false
+  _autoSpeechRepairTried = false
   stopSpeak()
 }
 function autoSpeechCut(text, final, first = false) {
@@ -1854,11 +1858,44 @@ function drainAutoSpeech() {
   const fail = (msg) => {
     if (token !== _autoSpeechToken) return
     _autoSpeechBusy = false
+    // 手机端可能因旧音频编码、系统媒体栈或 WebView 解码兼容性导致缓存播放失败。
+    // 首次失败不直接把用户打回“请重新朗读”，而是保留同一条正文，自动关闭缓存模式重新合成并覆盖缓存。
+    const repairMsg = trackIndex >= 0 ? store.msgs[trackIndex] : null
+    const repairSegments = repairMsg && Array.isArray(repairMsg._ttsSegments)
+      ? repairMsg._ttsSegments.map((s) => String(s || '').trim()).filter(Boolean)
+      : []
+    if (_autoSpeechCacheOnly && !_autoSpeechRepairTried && repairSegments.length) {
+      _autoSpeechRepairTried = true
+      _autoSpeechCacheOnly = false
+      _autoSpeechPinCache = true
+      _autoSpeechQueue = repairSegments.slice()
+      _autoSpeechUsedSegments = []
+      const repairOpts = _autoSpeechStoredOpts || snapshotSpeechOpts()
+      _autoSpeechStoredOpts = repairOpts
+      repairMsg._ttsCached = false
+      repairMsg._ttsCacheKind = ''
+      repairMsg._ttsSegments = []
+      saveMsgs()
+      const prevDone = _autoSpeechOnDone
+      _autoSpeechOnDone = async () => {
+        const list = _autoSpeechUsedSegments.slice()
+        if (_autoSpeechUsedFallback) await finalizeSystemSpeechCache(repairMsg, list, repairOpts)
+        else await finalizeMessageSpeechCache(repairMsg, list, repairOpts)
+        if (prevDone) await prevDone()
+      }
+      showToast('♻️ 本机音频缓存播放失败，正在自动重新生成并修复…', 'info')
+      setTimeout(() => { if (token === _autoSpeechToken) drainAutoSpeech() }, 0)
+      return
+    }
     _autoSpeechQueue = []
     if (trackIndex >= 0) speakingMsgIndex.value = -1
     showToast(msg === 'cache-miss' ? '♻️ 语音缓存已失效，请重新点一次朗读生成缓存' : '语音缓存播放失败，请重新朗读', 'info')
   }
-  speakWithScript(piece, done, trackIndex >= 0, true, fail, '', _autoSpeechCacheOnly, _autoSpeechPinCache, _autoSpeechStoredOpts)
+  const markFallback = () => {
+    _autoSpeechUsedFallback = true
+    if (_autoSpeechStoredOpts) _autoSpeechStoredOpts.engine = 'sys'
+  }
+  speakWithScript(piece, done, trackIndex >= 0, true, fail, '', _autoSpeechCacheOnly, _autoSpeechPinCache, _autoSpeechStoredOpts, markFallback)
 }
 function feedAutoSpeech(text, final = false) {
   if (store.cfg.ttsOn !== true) return

@@ -1,7 +1,7 @@
 {
   "name": "xingce-ai-assistant",
   "private": true,
-  "version": "3.8.352",
+  "version": "3.8.353",
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 5199 --strictPort",

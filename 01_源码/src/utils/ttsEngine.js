@@ -1671,7 +1671,7 @@ function guardToastOnce() {
   if (now - _guardToastAt < 60000) return
   _guardToastAt = now
   const cap = Number((store.cfg || {}).ttsDayCap) || 20000
-  showToast('💰 今日真人朗读已达额度上限（约 ' + cap + ' 字），已自动改用免费系统语音（本机离线）；可在 设置→语音 调整', 'info')
+  showToast('💰 今日付费真人朗读已达额度上限（约 ' + cap + ' 字），已自动改用免费 Edge 真人神经音色；可在 设置→语音 调整', 'info')
 }
 // 【v3.8.332】额度预警：用掉 80% 时提示一次，让用户提前知道即将降级（原先只有 100% 时才知道）
 let _guardWarnAt = 0
@@ -1727,8 +1727,80 @@ export async function prefetchTts(text, opts = {}) {
 }
 
 // ============ 统一入口 ============
-// speakPro(text, { voice, rate, pitch, speed, onEnd, onError }) —— 按 store.cfg.ttsMode 分发
+// 真人语音故障转移：用户选择真人引擎时，绝不再自动退回系统机械音。
+// 顺序为：当前引擎 → 其他已配置付费真人引擎 → Edge 神经音色；整链失败后再延时重试一轮。
+function humanEngineAvailable(id) {
+  if (id === 'glm') return !!gmCfg()
+  if (id === 'dash') return !!dashCfg()
+  if (id === 'openai') return !!openaiCfg()
+  if (id === 'edge') return true
+  return false
+}
+function humanCandidateOptions(id) {
+  const c = store.cfg || {}
+  if (id === 'glm') return { voice: c.ttsGm && c.ttsGm.voice, model: c.ttsGm && (c.ttsGm.model || 'glm-tts'), voiceCustom: '' }
+  if (id === 'dash') return { voice: c.ttsDash && c.ttsDash.voice, model: c.ttsDash && c.ttsDash.model, voiceCustom: (c.ttsDash && c.ttsDash.voiceCustom) || '' }
+  if (id === 'openai') return { voice: c.ttsOpenAI && c.ttsOpenAI.voice, model: c.ttsOpenAI && c.ttsOpenAI.model, voiceCustom: '' }
+  if (id === 'edge') return { voice: c.ttsEdgeVoice || 'zh-CN-XiaoxiaoNeural', model: 'edge-neural', voiceCustom: '' }
+  return {}
+}
+function humanEngineChain(preferred) {
+  const out = []
+  const push = (id) => { if (id && id !== 'sys' && !out.includes(id) && humanEngineAvailable(id)) out.push(id) }
+  push(preferred)
+  // 备用收费真人的顺序：百炼更便宜 → OpenAI 兼容 → 智谱；最后始终保留免费 Edge 神经音色。
+  push('dash')
+  push('openai')
+  push('glm')
+  push('edge')
+  return out
+}
+function humanAttemptFail(opts, msg) {
+  if (!opts.__noHumanFallback) return null
+  setStatus('error', '真人音色暂不可用，正在切换备用真人音色')
+  return { ok: false, msg: msg || '真人音色暂不可用', humanFailover: true }
+}
 export async function speakPro(text, opts = {}) {
+  const mode = String(opts.engine || (store.cfg && store.cfg.ttsMode) || 'sys')
+  if (mode === 'sys' || opts.__noHumanFallback === true) return await speakProAttempt(text, opts)
+  if (opts.cacheOnly === true) return await speakProAttempt(text, Object.assign({}, opts, { __noHumanFallback: true }))
+  const chain = humanEngineChain(mode)
+  const rounds = opts.singleRequest === true ? 1 : 2
+  let lastMsg = ''
+  for (let round = 0; round < rounds; round++) {
+    for (let i = 0; i < chain.length; i++) {
+      const id = chain[i]
+      const info = id === mode
+        ? { voice: opts.voice, model: opts.model, voiceCustom: opts.voiceCustom }
+        : humanCandidateOptions(id)
+      const attempt = Object.assign({}, opts, info, {
+        engine: id,
+        __noHumanFallback: true,
+        cacheOnly: false,
+        pinCache: true,
+        onError: null,
+        onFallback: null,
+        onEnd: (...args) => {
+          if (id !== mode && opts.onFallback) {
+            try { opts.onFallback({ from: mode, to: id, reason: lastMsg || '', voice: info.voice, model: info.model, voiceCustom: info.voiceCustom }) } catch (e) {}
+          }
+          if (opts.onEnd) opts.onEnd(...args)
+        }
+      })
+      const r = await speakProAttempt(text, attempt)
+      if (r && r.ok) {
+        return Object.assign({}, r, { engine: id })
+      }
+      if (r && r.msg) lastMsg = r.msg
+    }
+    if (round + 1 < rounds) await new Promise((resolve) => setTimeout(resolve, 700))
+  }
+  setStatus('error', '❌ 真人语音全部暂不可用')
+  if (opts.onError) opts.onError(lastMsg || '真人语音全部暂不可用')
+  return { ok: false, msg: lastMsg || '真人语音全部暂不可用', humanFailover: true }
+}
+// 单次真人/系统引擎尝试。仅供 speakPro 的真人故障转移链调用；页面不应直接调用。
+async function speakProAttempt(text, opts = {}) {
   stopSpeakPro()
   gapEnsure() // 在调用栈内同步建好 AudioContext（若由点击触发，可保证 running 可出声）
   primePlayback() // 同时解锁 HTMLAudio，避免 Web Audio 解码失败退回分段播放时被移动端拦截
@@ -1741,7 +1813,7 @@ export async function speakPro(text, opts = {}) {
   const { chunkSize, firstChunkSize } = ttsChunkPlan(opts)
   const t = cleanSpeechText(text)
   if (!t) { if (opts.onEnd) opts.onEnd(); return { ok: false, msg: 'empty' } }
-  // 省钱护栏：真人引擎超额度 → 自动退回免费系统语音（Edge/系统永不被拦）
+  // 省钱护栏：付费真人引擎超额度 → 自动退回免费 Edge 真人神经音色（仍保持真人音质）
   // 例外：整段都命中本地缓存时本次并不产生费用，保持原声引擎、不降级、也不占额度。
   if (mode === 'glm' || mode === 'openai' || mode === 'dash') {
     let fullyCached = false
@@ -1756,7 +1828,7 @@ export async function speakPro(text, opts = {}) {
     }
     if (!fullyCached && paidTtsBlocked(t.length)) {
       guardToastOnce()
-      mode = 'sys'
+      mode = opts.__noHumanFallback ? 'edge' : 'sys'
     } else if (!fullyCached) {
       guardWarnIfNear() // 用掉 80% 时预警一次（未触发降级才提示）
     }
@@ -1785,6 +1857,8 @@ export async function speakPro(text, opts = {}) {
           if (opts.onEnd) opts.onEnd()
           return { ok: true, cached: true }
         }
+        const failed = humanAttemptFail(opts, 'edge-cache-playback-failed')
+        if (failed) return failed
         const fallback = sysSpeak(t, { rate: opts.rate, pitch: opts.pitch, onEnd: opts.onEnd, onError: opts.onError })
         if (fallback) {
           if (opts.onFallback) opts.onFallback('edge-cache-playback-failed')
@@ -1798,6 +1872,8 @@ export async function speakPro(text, opts = {}) {
         await ttsCacheSet(ck, r.bytes, r.mime, opts.pinCache === true)
         const finished = await finishSpeak(r, opts, true)
         if (finished.ok) return finished
+        const failed = humanAttemptFail(opts, 'edge-playback-failed')
+        if (failed) return failed
         const fallback = sysSpeak(t, { rate: opts.rate, pitch: opts.pitch, onEnd: opts.onEnd, onError: opts.onError })
         if (fallback) {
           if (opts.onFallback) opts.onFallback('edge-playback-failed')
@@ -1808,6 +1884,8 @@ export async function speakPro(text, opts = {}) {
       // 【v3.8.332】Edge 失败（实测常因 403/网络不通）→ 回退系统语音，保证「一定读得出来」。
       // 原先 Edge 分支无回退，失败就直接静默，用户以为功能坏了。
       setStatus('error', '❌ ' + (r.msg || 'Edge 语音不可用'))
+      const failed = humanAttemptFail(opts, r.msg || 'edge-fail')
+      if (failed) return failed
       const edgeFallback = sysSpeak(t, { rate: opts.rate, pitch: opts.pitch, onEnd: opts.onEnd, onError: opts.onError })
       setStatus(edgeFallback ? 'done' : 'error', edgeFallback ? '⚠️ Edge 语音失败，已回退系统语音' : '❌ 朗读失败')
       if (edgeFallback) {
@@ -1843,6 +1921,8 @@ export async function speakPro(text, opts = {}) {
     const r = await glmSynthesize(t, { voice: opts.voice, model: opts.model, speed: opts.speed, chunkSize, firstChunkSize, pinCache: opts.pinCache === true, onChunk: (buf, text) => enqueueGapless(buf, text, 'audio/wav') })
     if (r.ok) return await finishStreamOrFallback(r, opts, t)
     setStatus('error', '❌ ' + r.msg)
+    const failed = humanAttemptFail(opts, r.msg)
+    if (failed) return failed
     const fallback = sysSpeak(t, { rate: opts.rate, pitch: opts.pitch, onEnd: opts.onEnd, onError: opts.onError })
     setStatus(fallback ? 'done' : 'error', fallback ? '⚠️ 真人引擎失败，已回退系统语音' : '❌ 朗读失败')
     if (fallback) {
@@ -1853,6 +1933,8 @@ export async function speakPro(text, opts = {}) {
     return { ok: fallback, msg: r.msg, fallback: true }
   } catch (e) {
     setStatus('error', '❌ ' + e.message)
+    const failed = humanAttemptFail(opts, e.message)
+    if (failed) return failed
     const fallback = sysSpeak(t, { rate: opts.rate, pitch: opts.pitch, onEnd: opts.onEnd, onError: opts.onError })
     if (fallback) {
       if (opts.onFallback) opts.onFallback(e.message)
@@ -1869,6 +1951,8 @@ async function finishStreamOrFallback(r, opts, text) {
     if (played.ok) return played
   }
   setStatus('error', '❌ ' + (r.msg || '真人语音不可用'))
+  const failed = humanAttemptFail(opts, r.msg || 'tts-fail')
+  if (failed) return failed
   const fallback = sysSpeak(text, { rate: opts.rate, pitch: opts.pitch, onEnd: opts.onEnd, onError: opts.onError })
   setStatus(fallback ? 'done' : 'error', fallback ? '⚠️ 真人引擎失败，已回退系统语音' : '❌ 朗读失败')
   if (fallback) {

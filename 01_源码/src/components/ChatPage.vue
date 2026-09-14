@@ -1891,9 +1891,15 @@ function drainAutoSpeech() {
     if (trackIndex >= 0) speakingMsgIndex.value = -1
     showToast(msg === 'cache-miss' ? '♻️ 语音缓存已失效，请重新点一次朗读生成缓存' : '语音缓存播放失败，请重新朗读', 'info')
   }
-  const markFallback = () => {
-    _autoSpeechUsedFallback = true
-    if (_autoSpeechStoredOpts) _autoSpeechStoredOpts.engine = 'sys'
+  const markFallback = (info) => {
+    const to = String((info && (info.to || info.engine)) || '').trim()
+    if (to && to !== 'sys') {
+      _autoSpeechUsedFallback = false
+      _autoSpeechStoredOpts = Object.assign({}, _autoSpeechStoredOpts || snapshotSpeechOpts(), { engine: to, voice: info.voice, model: info.model, voiceCustom: info.voiceCustom || '' })
+    } else {
+      _autoSpeechUsedFallback = true
+      if (_autoSpeechStoredOpts) _autoSpeechStoredOpts.engine = 'sys'
+    }
   }
   speakWithScript(piece, done, trackIndex >= 0, true, fail, '', _autoSpeechCacheOnly, _autoSpeechPinCache, _autoSpeechStoredOpts, markFallback)
 }
@@ -2124,22 +2130,27 @@ function speakWithScript(txt, onEnd, trackMessage = false, skipRewrite = false, 
 function speakMsgTxt(txt, onEnd, trackMessage = false, question = '', cacheOnly = false, pinCache = false, onFallback = null) {
   return speakWithScript(txt, onEnd, trackMessage, false, null, question, cacheOnly, pinCache, null, onFallback)
 }
+function speechOptionsForFallback(base, info) {
+  const o = info && typeof info === 'object' ? info : {}
+  const to = String(o.to || o.engine || '').trim()
+  if (to && to !== 'sys') return Object.assign({}, base || {}, { engine: to, voice: o.voice, model: o.model, voiceCustom: o.voiceCustom || '' })
+  return Object.assign({}, base || {}, { engine: 'sys' })
+}
 function startMessageSpeech(m, idx, txt, question) {
   const raw = String(txt || '').trim()
   if (!m || !raw) return
   speakingMsgIndex.value = Number(idx)
   const ready = cleanSpeechText(stripUnrelatedSpeech(raw, question)).trim()
-  let usedFallback = false
   const options = snapshotSpeechOpts()
-  const onFallback = () => {
-    usedFallback = true
-    finalizeSystemSpeechCache(m, [ready], options)
-  }
+  let actualOptions = null
+  const onFallback = (info) => { actualOptions = speechOptionsForFallback(options, info) }
   speakMsgTxt(txt, async (spoken) => {
-    if (usedFallback) return
     const spokenReady = cleanSpeechText(stripUnrelatedSpeech(String(spoken || ready || txt), question)).trim()
     if (!spokenReady) return
-    const ok = await finalizeMessageSpeechCache(m, [spokenReady], options)
+    const finalOpts = actualOptions || options
+    const ok = finalOpts.engine === 'sys'
+      ? finalizeSystemSpeechCache(m, [spokenReady], finalOpts)
+      : await finalizeMessageSpeechCache(m, [spokenReady], finalOpts)
     if (!ok) showToast('本次语音已播放，但未形成可验证的永久缓存；已保留本机重读记录', 'warning')
   }, true, question, false, true, onFallback)
 }

@@ -266,26 +266,28 @@ describe('真人引擎失败回退（回归：不得只弹网络错误而无声�
     store.cfg.ttsMode = 'openai'
     store.cfg.ttsGuard = false
     store.cfg.ttsOpenAI = { key: 'k', url: 'https://api.siliconflow.cn/v1', model: 'FunAudioLLM/CosyVoice2-0.5B', voice: 'default' }
+    store.cfg.ttsDash = { key: 'd', url: 'https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation', model: 'qwen3-tts-instruct-flash', voice: 'Cherry', voiceCustom: '', customVoices: [] }
     store.cfg.ttsRate = 1
   })
   afterEach(() => { vi.unstubAllGlobals() })
 
-  it('OpenAI 兼容网络失败时静默回退本机语音，只触发 onFallback 不触发 onError', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('Failed to fetch') }))
-    const spoken = []
-    class FakeUtterance {
-      constructor(text) { this.text = text }
+  it('OpenAI 兼容网络失败时自动切换百炼真人音色，不回退系统语音', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url) => {
+      const u = String(url || '')
+      if (u.includes('dashscope.aliyuncs.com')) return { ok: true, json: async () => ({ output: { audio: { url: 'https://audio.test/dash.mp3' } } }) }
+      if (u === 'https://audio.test/dash.mp3') return { ok: true, arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer }
+      throw new TypeError('Failed to fetch')
+    }))
+    class FakeAudio {
+      constructor() { this.paused = true; this.muted = false; this.currentTime = 0; this.onended = null; this.onerror = null; this.src = '' }
+      load() {}
+      pause() { this.paused = true }
+      play() { this.paused = false; setTimeout(() => this.onended && this.onended(), 0); return Promise.resolve() }
     }
-    vi.stubGlobal('SpeechSynthesisUtterance', FakeUtterance)
+    vi.stubGlobal('Audio', FakeAudio)
+    vi.stubGlobal('Blob', class { constructor(parts) { this.parts = parts } slice() { return this } })
+    vi.stubGlobal('URL', { createObjectURL: () => 'blob:fallback', revokeObjectURL: () => {} })
     vi.stubGlobal('window', {
-      speechSynthesis: {
-        speak: (u) => spoken.push(u.text),
-        cancel: () => {},
-        paused: false,
-        speaking: false,
-        pending: false,
-        resume: () => {}
-      },
       addEventListener: () => {},
       removeEventListener: () => {}
     })
@@ -293,10 +295,10 @@ describe('真人引擎失败回退（回归：不得只弹网络错误而无声�
     const onError = vi.fn()
     const r = await speakPro('这是一段用于验证回退的网络错误场景文本。', { engine: 'openai', rate: 1, pitch: 1, onFallback, onError })
     expect(r.ok).toBe(true)
-    expect(r.fallback).toBe(true)
+    expect(r.engine).toBe('dash')
     expect(onFallback).toHaveBeenCalled()
+    expect(onFallback.mock.calls[0][0]).toMatchObject({ from: 'openai', to: 'dash' })
     expect(onError).not.toHaveBeenCalled()
-    expect(spoken.join('')).toContain('这是一段用于验证回退')
   })
 })
 

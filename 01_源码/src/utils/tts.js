@@ -121,11 +121,13 @@ function errToast(msg) {
   try { showToast('🔊 朗读失败：' + String(msg || '').slice(0, 80), 'error') } catch (e) {}
 }
 let _lastFallbackToast = 0
-function fallbackToast() {
+function fallbackToast(info) {
   const now = Date.now()
   if (now - _lastFallbackToast < 8000) return
   _lastFallbackToast = now
-  try { showToast('🔊 真人音色连接失败，已自动改用本机语音；本次仍可正常朗读和永久重读', 'info') } catch (e) {}
+  const to = info && typeof info === 'object' ? String(info.to || info.engine || '') : ''
+  const label = to === 'glm' ? '智谱 GLM-TTS' : to === 'dash' ? '阿里百炼 Qwen3-TTS' : to === 'openai' ? 'OpenAI 兼容真人音色' : to === 'edge' ? 'Edge 神经音色' : '备用真人音色'
+  try { showToast('🔊 当前真人音色连接失败，已自动切换 ' + label + '；音质保持真人级，缓存与永久重读继续有效', 'info') } catch (e) {}
 }
 
 // 朗读：opts={ scene:'lady', rate:1, pitch:null, onEnd: fn, onError: fn }
@@ -145,7 +147,7 @@ export function speak(text, opts) {
     pinCache: opts.pinCache === true,
     singleRequest: opts.singleRequest === true,
     onEnd: opts.onEnd,
-    onFallback: (msg) => { fallbackToast(); if (opts.onFallback) opts.onFallback(msg) },
+    onFallback: (info) => { fallbackToast(info); if (opts.onFallback) opts.onFallback(info) },
     onError: (msg) => { errToast(msg); if (opts.onError) opts.onError(msg) }
   })
 }

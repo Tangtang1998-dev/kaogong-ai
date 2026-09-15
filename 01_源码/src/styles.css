@@ -3844,7 +3844,9 @@ body[data-theme='light'][data-tm='redblack'] .tab.on { background: linear-gradie
 .ck-welcome .cw-sub { font-size: calc(12px * var(--ui-fs-scale, 1)); color: var(--text2); margin-top: 3px; }
 .chat-tools { margin-bottom: 8px; }
 .chat-tools-hd { display: flex; align-items: center; justify-content: space-between; padding: 4px 8px; border-radius: 8px; background: rgba(6,14,26,0.4); border: 1px dashed rgba(80,200,255,0.2); }
-.cth-t { font-size: calc(12px * var(--ui-fs-scale, 1)); color: var(--text2); font-weight: 700; }
+.cth-t { display: inline-flex; align-items: center; gap: 5px; min-width: 0; font-size: calc(12px * var(--ui-fs-scale, 1)); color: var(--text2); font-weight: 700; }
+.cth-ic { line-height: 1; }
+.cth-label { white-space: nowrap; }
 .cth-btn { font-size: calc(11px * var(--ui-fs-scale, 1)); padding: 3px 10px; border-radius: 999px; border: 1px solid var(--glass-border); background: transparent; color: var(--text2); cursor: pointer; font-family: inherit; }
 .cth-btn:hover { border-color: var(--hud-cyan); color: var(--hud-cyan); }
 .chat-tools-bd { padding-top: 6px; }
@@ -5203,7 +5205,18 @@ body[data-theme='light'] .pa-btn { border-color: #334155; background: #0f172a; c
 
 /* 手机端训练工具：收起为 🎯训练 胶囊，展开为底部抽屉 */
 @media (max-width: 640px) {
+  .chat-tools.is-collapsed-mobile { margin-bottom: 4px; }
   .chat-tools-hd { border-radius: 999px; padding: 5px 12px; max-width: 160px; }
+  .chat-tools-hd.is-compact {
+    width: 44px; height: 44px; max-width: 44px; padding: 0;
+    justify-content: center; border-radius: 50%; border-style: solid;
+    border-color: rgba(80,200,255,.35); background: color-mix(in srgb, var(--glass-bg-strong) 88%, var(--hud-cyan) 12%);
+    box-shadow: 0 6px 18px rgba(0,0,0,.22); cursor: pointer; touch-action: manipulation;
+  }
+  .chat-tools-hd.is-compact:hover,
+  .chat-tools-hd.is-compact:active { border-color: var(--hud-cyan); transform: translateY(-1px); }
+  .chat-tools-hd.is-compact .cth-t { font-size: 0; justify-content: center; }
+  .chat-tools-hd.is-compact .cth-ic { font-size: 21px; }
   .chat-tools-hd .cth-t { font-size: calc(13px * var(--ui-fs-scale, 1)); }
   .chat-tools-bd {
     position: fixed; left: 8px; right: 8px; bottom: 82px; z-index: 322;

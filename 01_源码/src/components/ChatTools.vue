@@ -79,10 +79,19 @@ const {
 </script>
 
 <template>
-      <div class="chat-tools">
-        <div class="chat-tools-hd">
-          <span class="cth-t">{{ isNarrow ? '🎯 训练' : '🛠️ 训练工具' }}</span>
-          <button class="cth-btn" @click="toggleTools()">{{ toolsCollapsed ? '▾ 展开' : '▴ 收起' }}</button>
+      <div class="chat-tools" :class="{ 'is-collapsed-mobile': isNarrow && toolsCollapsed }">
+        <div
+          class="chat-tools-hd"
+          :class="{ 'is-compact': isNarrow && toolsCollapsed }"
+          :title="isNarrow && toolsCollapsed ? '展开训练工具' : ''"
+          :aria-label="isNarrow && toolsCollapsed ? '展开训练工具' : ''"
+          @click="isNarrow && toolsCollapsed && toggleTools()"
+        >
+          <span class="cth-t">
+            <span class="cth-ic">🎯</span>
+            <span v-if="!isNarrow || !toolsCollapsed" class="cth-label">{{ isNarrow ? '训练' : '🛠️ 训练工具' }}</span>
+          </span>
+          <button v-if="!isNarrow || !toolsCollapsed" class="cth-btn" :aria-expanded="!toolsCollapsed" @click.stop="toggleTools()">{{ toolsCollapsed ? '▾ 展开' : '▴ 收起' }}</button>
         </div>
         <div v-if="!toolsCollapsed && isNarrow" class="chat-tools-ov" @click="toggleTools()"></div>
         <div v-show="!toolsCollapsed" class="chat-tools-bd">

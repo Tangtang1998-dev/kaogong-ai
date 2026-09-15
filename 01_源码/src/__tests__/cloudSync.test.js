@@ -1,7 +1,9 @@
 import { describe, it, expect } from 'vitest'
-import { applyLocalMerge, hydrateStoreFromPlan, mergeArrays, mergeSyncData, shouldSyncKey, syncScopeFromBackup, makeCloudEnvelope, cloudEnvelopeMeta, syncDataHash, syncOverview, saveSyncState, restoreCloudSnapshot, collectCloudData } from '../utils/cloudSync'
+import { applyLocalMerge, hydrateStoreFromPlan, mergeArrays, mergeSyncData, shouldSyncKey, syncScopeFromBackup, makeCloudEnvelope, cloudEnvelopeMeta, syncDataHash, syncOverview, saveSyncState, restoreCloudSnapshot, collectCloudData, buildMembershipSyncBundle, applyMembershipSyncBundle, MEMBERSHIP_SYNC_KEY } from '../utils/cloudSync'
 import { webdavFileUrl, webdavSyncUrl, describeWebdavHttp } from '../utils/webdav'
 import { store } from '../store'
+
+const PAID_CODE = 'XC1.eyJ2IjoxLCJsaWQiOiJYQy1NVTJBWUFWQiIsInBsYW4iOiJwcm92aW5jZSIsImV4YW0iOiJ0ZXN0IiwiZXhwIjoyMDUxMjc5OTk5MDAwLCJkZXZpY2VzIjpbIlhDLVRFU1QtMDAwMC0wMDAxIl0sImZlYXR1cmVzIjpbImNoYXQiLCJxdWl6Iiwid3JvbmciLCJ0dHMiLCJzZWFyY2giLCJwZGYiXSwiaWF0IjoxNzg5NDU0NDA5MDk1fQ.LC8sKcMChU-YoMxpQUbSwRntaCoh8VlJkhjPBayPIvVsfC6W_AwsBD91Pu4V4do8G2hj0w-707wJQbFc3Lc36w'
 
 const testMem = new Map()
 globalThis.localStorage = {
@@ -38,34 +40,31 @@ describe('cloudSync 多端安全合并', () => {
     expect(JSON.parse(merged.xc_wqs)[0].question).toBe('手机新题面')
   })
 
-  it('仅同步学习数据，设置、密钥与纯本机 UI 全部排除', () => {
+  it('仅同步学习数据与会员凭据包，设置、密钥与纯本机 UI 排除', () => {
     expect(shouldSyncKey('xc_msgs')).toBe(true)
     expect(shouldSyncKey('xc_cfg')).toBe(false)
     expect(shouldSyncKey('xc_chat_draft')).toBe(true)
     expect(shouldSyncKey('xc_recent_qs')).toBe(true)
     expect(shouldSyncKey('xc_auth')).toBe(false)
     expect(shouldSyncKey('xc_pet_pos_d')).toBe(false)
+    expect(shouldSyncKey(MEMBERSHIP_SYNC_KEY)).toBe(true)
     expect(shouldSyncKey('xc_offline_license_v1')).toBe(false)
     expect(shouldSyncKey('xc_device_code_v1')).toBe(false)
     expect(shouldSyncKey('xc_offline_trial_v1')).toBe(false)
-    const scoped = syncScopeFromBackup({ data: { xc_msgs: '[]', xc_cfg: '{}', xc_pet_pos_d: '{}', xc_pet: '{}', xc_offline_license_v1: '{}', xc_device_code_v1: 'XC-LOCAL-0000-0000', xc_offline_trial_v1: '{}' } })
-    expect(Object.keys(scoped).sort()).toEqual(['xc_msgs', 'xc_pet'])
+    const scoped = syncScopeFromBackup({ data: { xc_msgs: '[]', xc_cfg: '{}', xc_pet_pos_d: '{}', xc_pet: '{}', [MEMBERSHIP_SYNC_KEY]: '{"v":1}', xc_offline_license_v1: '{}', xc_device_code_v1: 'XC-LOCAL-0000-0000', xc_offline_trial_v1: '{}' } })
+    expect(Object.keys(scoped).sort()).toEqual(['xc_msgs', 'xc_pet', MEMBERSHIP_SYNC_KEY].sort())
   })
 
-  it('云端旧授权字段不会覆盖本机授权码、设备码和试用状态', () => {
+  it('新设备通过云同步自助接管会员，不需要管理员迁移', () => {
     testMem.clear()
-    const local = {
-      xc_offline_license_v1: JSON.stringify({ code: 'LOCAL-LICENSE' }),
-      xc_device_code_v1: 'XC-LOCAL-0000-0000',
-      xc_offline_trial_v1: JSON.stringify({ points: 17, start: 1690000000000 }),
-      xc_msgs: JSON.stringify([{ id: 'local-msg', t: 1690000000100 }])
-    }
-    for (const [k, v] of Object.entries(local)) testMem.set(k, v)
+    const paidDevice = 'XC-TEST-0000-0001'
+    testMem.set('xc_device_code_v1', 'XC-NEWD-1111-2222')
+    testMem.set('xc_offline_trial_v1', JSON.stringify({ start: Date.now(), points: 30, device: 'XC-NEWD-1111-2222' }))
+    const localBundle = buildMembershipSyncBundle({ persist: true })
+    testMem.set('xc_msgs', JSON.stringify([{ id: 'local-msg', t: 1690000000100 }]))
     const remote = {
       data: {
-        xc_offline_license_v1: JSON.stringify({ code: 'STALE-CLOUD-LICENSE' }),
-        xc_device_code_v1: 'XC-CLOUD-9999-9999',
-        xc_offline_trial_v1: JSON.stringify({ points: 30, start: 0 }),
+        [MEMBERSHIP_SYNC_KEY]: JSON.stringify({ v: 1, at: Date.now() + 1000, sourceHash: 'paid', device: paidDevice, license: { code: PAID_CODE, activatedAt: 1789454409095 }, trial: null, expiresAt: 2051279999000 }),
         xc_msgs: JSON.stringify([{ id: 'remote-msg', t: 1690000000200 }])
       }
     }
@@ -73,13 +72,25 @@ describe('cloudSync 多端安全合并', () => {
     expect(env.data.xc_offline_license_v1).toBeUndefined()
     expect(env.data.xc_device_code_v1).toBeUndefined()
     expect(env.data.xc_offline_trial_v1).toBeUndefined()
-    const plan = applyLocalMerge({ data: local }, remote, {})
-    expect(plan.merged.xc_offline_license_v1).toBeUndefined()
-    expect(plan.merged.xc_device_code_v1).toBeUndefined()
-    expect(plan.merged.xc_offline_trial_v1).toBeUndefined()
-    expect(testMem.get('xc_offline_license_v1')).toBe(local.xc_offline_license_v1)
-    expect(testMem.get('xc_device_code_v1')).toBe(local.xc_device_code_v1)
-    expect(testMem.get('xc_offline_trial_v1')).toBe(local.xc_offline_trial_v1)
+    expect(env.data[MEMBERSHIP_SYNC_KEY]).toBeTruthy()
+    const plan = applyLocalMerge({ data: { [MEMBERSHIP_SYNC_KEY]: JSON.stringify(localBundle), xc_msgs: testMem.get('xc_msgs') } }, remote, {})
+    expect(plan.merged[MEMBERSHIP_SYNC_KEY]).toContain(paidDevice)
+    expect(testMem.get('xc_device_code_v1')).toBe(paidDevice)
+    expect(JSON.parse(testMem.get('xc_offline_license_v1')).code).toBe(PAID_CODE)
+  })
+
+  it('云端旧试用不会把本机正式会员降级或吃掉', () => {
+    testMem.clear()
+    const paidDevice = 'XC-TEST-0000-0001'
+    testMem.set('xc_device_code_v1', paidDevice)
+    testMem.set('xc_offline_license_v1', JSON.stringify({ code: PAID_CODE, activatedAt: 1789454409095 }))
+    const paidBundle = buildMembershipSyncBundle({ persist: true })
+    const trialOnly = { v: 1, at: Date.now() + 9999, sourceHash: 'trial', device: 'XC-OLD--', trial: { start: Date.now(), points: 30 }, license: null, expiresAt: 0 }
+    const r = applyMembershipSyncBundle(JSON.stringify(trialOnly))
+    expect(r.applied).toBe(false)
+    expect(testMem.get('xc_device_code_v1')).toBe(paidDevice)
+    expect(JSON.parse(testMem.get('xc_offline_license_v1')).code).toBe(PAID_CODE)
+    expect(JSON.parse(testMem.get(MEMBERSHIP_SYNC_KEY)).sourceHash).toBe(paidBundle.sourceHash)
   })
 
   it('设置与密钥不进入云同步，但本机现有配置保持不变', () => {

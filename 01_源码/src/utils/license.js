@@ -7,6 +7,7 @@ const STORAGE_KEY = 'xc_offline_license_v1'
 const DEVICE_KEY = 'xc_device_code_v1'
 const TRIAL_DAYS = 7
 const TRIAL_POINTS = 30
+export const TRIAL_POINT_COSTS = Object.freeze({ chat: 5, feature: 1 })
 const PUBLIC_JWK = { kty: 'EC', crv: 'P-256', x: '_eTtxfkTlCNxT5oL_JlxK9Vy5poKtJrNPhPl738Ctlo', y: 'ofbmtixWhaQQTyFgirnWvB7CLdkR7Pys7exu04RDLhc' }
 
 export const PLANS = [
@@ -18,6 +19,28 @@ export const PLANS = [
   { id: 'province', name: '省考季票', price: 129, exam: 'province', tag: '考试周期', summary: '覆盖指定省份省考备考周期', details: ['有效期按所选省考考试周期签发', '适合明确参加某一省省考的考生', '续期或考试时间变化时重新签发新码'] }
 ]
 
+export const PROMOTION = {
+  name: '本周日限时立减 5 元',
+  startsAt: new Date('2026-09-20T08:00:00+08:00').getTime(),
+  endsAt: new Date('2026-09-20T22:00:00+08:00').getTime(),
+  discount: 5
+}
+
+export function promotionState(nowMs = Date.now()) {
+  const active = nowMs >= PROMOTION.startsAt && nowMs <= PROMOTION.endsAt
+  return { ...PROMOTION, active, text: active ? PROMOTION.name : '本活动已结束' }
+}
+
+export function planPrice(plan, nowMs = Date.now()) {
+  const price = Math.max(0, Number(plan && plan.price) || 0)
+  const promo = promotionState(nowMs)
+  return promo.active ? Math.max(0, price - PROMOTION.discount) : price
+}
+
+export function trialPointCost(kind = 'feature') {
+  return kind === 'chat' ? TRIAL_POINT_COSTS.chat : TRIAL_POINT_COSTS.feature
+}
+
 export const licenseState = reactive({
   ready: false,
   active: true,
@@ -26,6 +49,7 @@ export const licenseState = reactive({
   planName: '未激活',
   expiresAt: 0,
   deviceCode: '',
+  licenseId: '',
   trialPoints: TRIAL_POINTS,
   trialDaysLeft: TRIAL_DAYS,
   viewOnly: false,
@@ -128,12 +152,14 @@ export async function licenseInit() {
       licenseState.plan = p.plan || 'month'
       licenseState.planName = (PLANS.find((x) => x.id === p.plan) || {}).name || '正式套餐'
       licenseState.expiresAt = Number(p.exp) || 0
+      licenseState.licenseId = String(p.lid || '')
       licenseState.message = '已激活 · 到期 ' + new Date(licenseState.expiresAt).toLocaleDateString('zh-CN')
       licenseState.ready = true
       return licenseState
     }
   }
   applyTrial()
+  licenseState.licenseId = ''
   licenseState.ready = true
   return licenseState
 }
@@ -182,4 +208,4 @@ export function licenseDeviceCode() {
   return getDeviceCode()
 }
 
-export default { PLANS, licenseState, licenseInit, activateLicenseCode, verifyLicenseCode, requireLicense, consumeLicensePoints, licenseDeviceCode }
+export default { PLANS, PROMOTION, TRIAL_POINT_COSTS, promotionState, planPrice, trialPointCost, licenseState, licenseInit, activateLicenseCode, verifyLicenseCode, requireLicense, consumeLicensePoints, licenseDeviceCode }

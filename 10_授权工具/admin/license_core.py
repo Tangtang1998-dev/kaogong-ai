@@ -367,6 +367,59 @@ def generate_license(
     )
 
 
+def migrate_license(
+    private_key: ec.EllipticCurvePrivateKey,
+    old_code: str,
+    new_device: str,
+    *,
+    customer: str = "",
+    order_id: str = "",
+    note: str = "",
+    now_ms: int | None = None,
+) -> LicenseResult:
+    """Reissue an unexpired license to a new device while keeping its expiry."""
+    now_ms = int(now_ms if now_ms is not None else time.time() * 1000)
+    old_payload = verify_license(old_code, now_ms=now_ms)
+    device_code = validate_device_code(new_device)
+    expires_at = int(old_payload.get("exp") or 0)
+    if expires_at <= now_ms:
+        raise LicenseError("原激活码已过期，不能迁移")
+    plan = str(old_payload.get("plan") or "month")
+    label = str((PLANS.get(plan) or {}).get("name") or plan)
+    old_lid = str(old_payload.get("lid") or "")
+    payload = {
+        "v": 1,
+        "lid": license_id_from_now(now_ms),
+        "plan": plan,
+        "exam": str(old_payload.get("exam") or ""),
+        "exp": expires_at,
+        "devices": [device_code],
+        "features": old_payload.get("features") or FEATURES,
+        "iat": now_ms,
+        "migratedFrom": old_lid,
+    }
+    payload_text = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+    payload_part = b64url_encode(payload_text.encode("utf-8"))
+    signature_der = private_key.sign(payload_part.encode("utf-8"), ec.ECDSA(hashes.SHA256()))
+    code = f"{LICENSE_PREFIX}.{payload_part}.{b64url_encode(_signature_to_p1363(signature_der))}"
+    verify_license(code, device_code, now_ms=now_ms)
+    migration_note = str(note or "").strip()
+    if not migration_note:
+        migration_note = f"迁移自授权编号 {old_lid or '未知'}"
+    return LicenseResult(
+        label=label,
+        plan=plan,
+        device=device_code,
+        license_id=str(payload["lid"]),
+        issued_at=now_ms,
+        expires_at=expires_at,
+        code=code,
+        customer=str(customer or "").strip(),
+        order_id=str(order_id or "").strip(),
+        note=migration_note,
+    )
+
+
 def sha256_file(path: str | Path) -> str:
     digest = hashlib.sha256()
     with Path(path).open("rb") as handle:

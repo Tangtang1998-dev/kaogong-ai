@@ -3,7 +3,7 @@
 // GitHub API 支持 CORS，适合网页 / iPad / 安卓直接用同一 Token 互通。
 /* global btoa, atob */
 import { store, saveCfg } from '../store'
-import { applyLocalMerge, hydrateStoreFromPlan, readSyncState, saveSyncState, syncBaseline, makeCloudEnvelope, cloudEnvelopeMeta, syncDataHash, syncDeviceInfo, syncOverview, restoreCloudSnapshot, collectCloudData } from './cloudSync'
+import { applyLocalMerge, hydrateStoreFromPlan, readSyncState, saveSyncState, syncBaseline, makeCloudEnvelope, cloudEnvelopeMeta, syncDataHash, syncDeviceInfo, syncOverview, restoreCloudSnapshot, collectCloudData, withPreferredMembership } from './cloudSync'
 
 const GH_API = 'https://api.github.com'
 const DEFAULT_REPO = 'xingce-ai-cloud-sync'
@@ -203,7 +203,7 @@ export async function runGitHubUpload(options = {}) {
   if (remoteRaw && !options.force && !sameAsLocal && (state.kind !== 'gh' || meta.t > state.remoteT)) {
     return { ok: false, needsConfirm: true, direction: 'upload', remoteT: meta.t, remoteDevice: meta.deviceLabel, repo: repoInfo.full }
   }
-  const body = makeCloudEnvelope(local.data)
+  const body = makeCloudEnvelope(withPreferredMembership(local.data, remoteRaw))
   const payload = {
     message: '行测AI上传本机版本 ' + new Date(body.t).toLocaleString(),
     content: b64EncodeUtf8(JSON.stringify(body))

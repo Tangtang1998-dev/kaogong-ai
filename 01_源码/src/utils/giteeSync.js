@@ -2,7 +2,7 @@
 // Gitee API 允许浏览器跨域；同步文件仍放在用户自己的私人仓库，学习数据不公开。
 /* global btoa, atob, FormData */
 import { store, saveCfg } from '../store'
-import { applyLocalMerge, hydrateStoreFromPlan, readSyncState, saveSyncState, syncBaseline, makeCloudEnvelope, cloudEnvelopeMeta, syncDataHash, syncDeviceInfo, syncOverview, restoreCloudSnapshot, collectCloudData } from './cloudSync'
+import { applyLocalMerge, hydrateStoreFromPlan, readSyncState, saveSyncState, syncBaseline, makeCloudEnvelope, cloudEnvelopeMeta, syncDataHash, syncDeviceInfo, syncOverview, restoreCloudSnapshot, collectCloudData, withPreferredMembership } from './cloudSync'
 
 const GE_API = 'https://gitee.com/api/v5'
 const DEFAULT_REPO = 'xingce-ai-cloud-sync'
@@ -267,7 +267,7 @@ export async function runGiteeUpload(options = {}) {
   if (remoteRaw && !options.force && !sameAsLocal && (state.kind !== 'ge' || meta.t > state.remoteT)) {
     return { ok: false, needsConfirm: true, direction: 'upload', remoteT: meta.t, remoteDevice: meta.deviceLabel, repo: repoInfo.full }
   }
-  const body = makeCloudEnvelope(local.data)
+  const body = makeCloudEnvelope(withPreferredMembership(local.data, remoteRaw))
   await writeRemote(repoInfo.full, repoInfo.branch, JSON.stringify(body), remoteFile ? remoteFile.sha : '')
   saveSyncState({
     ...state,

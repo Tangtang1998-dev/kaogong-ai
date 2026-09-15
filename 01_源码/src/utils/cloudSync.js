@@ -8,6 +8,7 @@ import { webdavSyncUrl, wdAuthHeaders, webdavGet, webdavPutFile } from './webdav
 import { WRONG_DELETED_KEY, filterDeletedWrongs, parseWrongDeleted } from './wrongDelete'
 
 export const SYNC_STATE_KEY = 'xc_sync_state'
+export const MEMBERSHIP_SYNC_KEY = 'xc_membership_sync_v1'
 const LOCAL_ONLY_KEYS = new Set([
   'xc_cfg', 'xc_auth', 'xc_auth_verify', 'xc_errlog', 'xc_global_fab',
   'xc_chat_tools', 'xc_onboarded',
@@ -26,6 +27,7 @@ const LOCAL_ONLY_PREFIXES = [
 
 export function shouldSyncKey(k) {
   if (!String(k || '').startsWith('xc_')) return false
+  if (k === MEMBERSHIP_SYNC_KEY) return true
   if (LOCAL_ONLY_KEYS.has(k)) return false
   if (LOCAL_ONLY_PREFIXES.some((p) => String(k).startsWith(p))) return false
   return true
@@ -45,6 +47,127 @@ function normalizeSyncValue(k, raw) {
     } catch (e) { /* 保持原值，避免破坏非标准旧备份 */ }
   }
   return raw
+}
+
+function parseJsonValue(raw, fallback = null) {
+  if (raw && typeof raw === 'object') return raw
+  try { return JSON.parse(String(raw || '')) ?? fallback } catch (e) { return fallback }
+}
+
+function validDeviceCode(code) {
+  return /^XC-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(String(code || '').trim())
+}
+
+function decodeLicensePayload(code) {
+  const parts = String(code || '').trim().split('.')
+  if (parts.length !== 3 || parts[0] !== 'XC1') return null
+  try {
+    let b64 = parts[1].replace(/-/g, '+').replace(/_/g, '/')
+    while (b64.length % 4) b64 += '='
+    const binary = globalThis.atob(b64)
+    const bytes = new Uint8Array(binary.length)
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+    return JSON.parse(new TextDecoder().decode(bytes))
+  } catch (e) {
+    return null
+  }
+}
+
+function readRawMembership() {
+  const license = parseJsonValue(localStorage.getItem('xc_offline_license_v1'), null)
+  const device = String(localStorage.getItem('xc_device_code_v1') || '').trim()
+  const trial = parseJsonValue(localStorage.getItem('xc_offline_trial_v1'), null)
+  return { license, device, trial }
+}
+
+function membershipBundleScore(bundle, nowMs = Date.now()) {
+  if (!bundle || bundle.v !== 1) return -1
+  const code = bundle.license && String(bundle.license.code || '')
+  const payload = decodeLicensePayload(code)
+  const exp = Number(payload && payload.exp) || 0
+  if (exp > nowMs) return 2e15 + exp
+  const t = bundle.trial || {}
+  const start = Number(t.start) || 0
+  const points = Number(t.points) || 0
+  if (start > 0 && start + 7 * 86400000 > nowMs && points > 0) return 1e15 + points
+  return 0
+}
+
+function parseMembershipBundle(raw) {
+  const b = parseJsonValue(raw, null)
+  if (!b || b.v !== 1) return null
+  return b
+}
+
+export function buildMembershipSyncBundle(options = {}) {
+  const raw = readRawMembership()
+  const sourceHash = JSON.stringify(raw)
+  const existing = parseMembershipBundle(localStorage.getItem(MEMBERSHIP_SYNC_KEY))
+  if (existing && existing.sourceHash === sourceHash && options.refresh !== true) return existing
+  const payload = decodeLicensePayload(raw.license && raw.license.code)
+  const bundle = {
+    v: 1,
+    at: Date.now(),
+    sourceHash,
+    device: raw.device,
+    license: raw.license,
+    trial: raw.trial,
+    plan: payload && payload.plan ? String(payload.plan) : '',
+    lid: payload && payload.lid ? String(payload.lid) : '',
+    expiresAt: Number(payload && payload.exp) || 0
+  }
+  if (options.persist !== false) {
+    try { localStorage.setItem(MEMBERSHIP_SYNC_KEY, JSON.stringify(bundle)) } catch (e) {}
+  }
+  return bundle
+}
+
+export function applyMembershipSyncBundle(raw, options = {}) {
+  const bundle = parseMembershipBundle(raw)
+  if (!bundle) return { applied: false, reason: 'empty' }
+  const current = buildMembershipSyncBundle({ persist: false })
+  const nextScore = membershipBundleScore(bundle)
+  const currentScore = membershipBundleScore(current)
+  if (!options.force && nextScore < currentScore) return { applied: false, reason: 'lower-benefit', currentScore, nextScore }
+  let changed = false
+  if (validDeviceCode(bundle.device)) {
+    if (localStorage.getItem('xc_device_code_v1') !== bundle.device) { localStorage.setItem('xc_device_code_v1', bundle.device); changed = true }
+  }
+  if (bundle.license && typeof bundle.license === 'object' && String(bundle.license.code || '').startsWith('XC1.')) {
+    const next = JSON.stringify(bundle.license)
+    if (localStorage.getItem('xc_offline_license_v1') !== next) { localStorage.setItem('xc_offline_license_v1', next); changed = true }
+  }
+  if (bundle.trial && typeof bundle.trial === 'object') {
+    const next = JSON.stringify(bundle.trial)
+    if (localStorage.getItem('xc_offline_trial_v1') !== next) { localStorage.setItem('xc_offline_trial_v1', next); changed = true }
+  }
+  try { localStorage.setItem(MEMBERSHIP_SYNC_KEY, JSON.stringify(bundle)) } catch (e) {}
+  if (changed) import('./license').then((m) => m.licenseInit && m.licenseInit()).catch(() => {})
+  return { applied: true, changed, bundle }
+}
+
+function preferredMembershipRaw(localData, remoteData, preferRemote = false) {
+  const localRaw = localData && localData[MEMBERSHIP_SYNC_KEY]
+  const remoteRaw = remoteData && remoteData[MEMBERSHIP_SYNC_KEY]
+  const local = parseMembershipBundle(localRaw)
+  const remote = parseMembershipBundle(remoteRaw)
+  if (!local) return remoteRaw || null
+  if (!remote) return localRaw || null
+  const ls = membershipBundleScore(local)
+  const rs = membershipBundleScore(remote)
+  if (rs > ls) return remoteRaw
+  if (rs < ls) return localRaw
+  if (Number(remote.at) > Number(local.at)) return remoteRaw
+  if (preferRemote) return remoteRaw
+  return localRaw
+}
+
+export function withPreferredMembership(localData, remoteRaw) {
+  const local = localData || {}
+  const remote = remoteRaw ? rawScopeFromBackup(remoteRaw) : {}
+  const chosen = preferredMembershipRaw(local, remote, false)
+  if (chosen == null) return local
+  return { ...local, [MEMBERSHIP_SYNC_KEY]: chosen }
 }
 
 export function syncScopeFromBackup(obj) {
@@ -87,6 +210,7 @@ export function collectCloudData() {
   if (Array.isArray(store.notes)) put('xc_notes', store.notes)
   if (Array.isArray(store.myMem)) put('xc_my_mem', store.myMem)
   if (store.mode) put('xc_mode', store.mode)
+  put(MEMBERSHIP_SYNC_KEY, buildMembershipSyncBundle({ persist: true }))
   return all
 }
 
@@ -331,6 +455,9 @@ export function mergeSyncData(localData, remoteData, baseline = {}, opts = {}) {
     const remoteChanged = rv !== base[k]
     out[k] = opts.preferRemote && !localChanged ? rv : (!localChanged && remoteChanged ? rv : lv)
   }
+  const membership = preferredMembershipRaw(local, remote, !!opts.preferRemote)
+  if (membership != null) out[MEMBERSHIP_SYNC_KEY] = membership
+  else delete out[MEMBERSHIP_SYNC_KEY]
   return out
 }
 
@@ -442,6 +569,7 @@ export function applyLocalMerge(localAll, remoteRaw, baseline = {}, opts = {}) {
   const remote = remoteRaw ? syncScopeFromBackup(remoteRaw) : {}
   const merged = mergeSyncData(local, remote, baseline, opts)
   const changed = writeMerged(merged)
+  if (merged[MEMBERSHIP_SYNC_KEY]) applyMembershipSyncBundle(merged[MEMBERSHIP_SYNC_KEY])
   const rawRemote = remoteRaw ? rawScopeFromBackup(remoteRaw) : {}
   const sameAsRemote = remoteRaw ? fingerprint(rawRemote) === fingerprint(merged) : false
   return { local, remote, merged, changed, sameAsRemote }
@@ -499,6 +627,7 @@ export function restoreCloudSnapshot(remoteRaw) {
   if (failed.length) {
     throw new Error('云端下载不完整，未写入：' + failed.join('、') + '。请先导出备份并清理站点存储空间后重试')
   }
+  if (remote[MEMBERSHIP_SYNC_KEY]) applyMembershipSyncBundle(remote[MEMBERSHIP_SYNC_KEY])
   hydrateStoreFromRaw(remoteRaw)
   return report
 }
@@ -558,7 +687,7 @@ export async function runCloudUpload(options = {}) {
   if (remoteRaw && !options.force && !sameAsLocal && (state.kind !== 'wd' || meta.t > state.remoteT)) {
     return { ok: false, needsConfirm: true, direction: 'upload', remoteT: meta.t, remoteDevice: meta.deviceLabel }
   }
-  const body = makeCloudEnvelope(local.data)
+  const body = makeCloudEnvelope(withPreferredMembership(local.data, remoteRaw))
   await webdavPutFile(url, hdrs, JSON.stringify(body))
   saveSyncState({
     ...state,

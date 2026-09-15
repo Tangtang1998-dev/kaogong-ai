@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { PLANS, licenseState, licenseInit, consumeLicensePoints, verifyLicenseCode } from '../utils/license'
+import { PLANS, TRIAL_POINT_COSTS, licenseState, licenseInit, consumeLicensePoints, verifyLicenseCode, promotionState, planPrice, trialPointCost } from '../utils/license'
 
 const mem = new Map()
 globalThis.localStorage = {
@@ -33,6 +33,15 @@ describe('离线授权', () => {
     expect(PLANS.find((p) => p.id === 'year')).toMatchObject({ price: 299, days: 365 })
   })
 
+  it('本周日 08:00-22:00 所有套餐限时立减 5 元', async () => {
+    expect(promotionState(Date.parse('2026-09-20T07:59:59+08:00')).active).toBe(false)
+    expect(promotionState(Date.parse('2026-09-20T08:00:00+08:00')).active).toBe(true)
+    expect(promotionState(Date.parse('2026-09-20T22:00:00+08:00')).active).toBe(true)
+    expect(promotionState(Date.parse('2026-09-20T22:00:01+08:00')).active).toBe(false)
+    expect(planPrice(PLANS.find((p) => p.id === 'month'), Date.parse('2026-09-20T12:00:00+08:00'))).toBe(34)
+    expect(planPrice(PLANS.find((p) => p.id === 'year'), Date.parse('2026-09-20T12:00:00+08:00'))).toBe(294)
+  })
+
   it('首次运行自动开始 7 天 30 点试用', async () => {
     await licenseInit()
     expect(licenseState.mode).toBe('trial')
@@ -41,12 +50,24 @@ describe('离线授权', () => {
     expect(licenseState.trialDaysLeft).toBe(7)
   })
 
-  it('试用点数会被逐次扣减，扣完后锁定 AI', async () => {
+  it('试用对话每次扣 5 点，其他 AI 功能每次扣 1 点', async () => {
+    await licenseInit()
+    expect(TRIAL_POINT_COSTS).toEqual({ chat: 5, feature: 1 })
+    expect(trialPointCost('chat')).toBe(5)
+    expect(trialPointCost('feature')).toBe(1)
+    expect(consumeLicensePoints(trialPointCost('chat')).ok).toBe(true)
+    expect(licenseState.trialPoints).toBe(25)
+    expect(consumeLicensePoints(trialPointCost('feature')).ok).toBe(true)
+    expect(licenseState.trialPoints).toBe(24)
+  })
+
+  it('试用点数不足时拒绝请求，扣完后锁定全部 AI', async () => {
     await licenseInit()
     const r = consumeLicensePoints(30)
     expect(r.ok).toBe(true)
     expect(licenseState.trialPoints).toBe(0)
     expect(licenseState.active).toBe(false)
-    expect(consumeLicensePoints(1).ok).toBe(false)
+    expect(consumeLicensePoints(trialPointCost('chat')).ok).toBe(false)
+    expect(consumeLicensePoints(trialPointCost('feature')).ok).toBe(false)
   })
 })

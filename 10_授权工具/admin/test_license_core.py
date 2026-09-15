@@ -7,6 +7,7 @@ from license_core import (
     RecordStore,
     generate_license,
     load_private_key,
+    migrate_license,
     normalize_device_code,
     resolve_expiry,
     self_test,
@@ -67,6 +68,14 @@ class LicenseCoreTests(unittest.TestCase):
             self.assertEqual(rows[0]["customer"], "测试客户")
             self.assertEqual(rows[0]["code"], result.code)
             self.assertTrue(store.jsonl_path.exists())
+
+    def test_license_can_migrate_to_new_device_with_same_expiry(self):
+        source = generate_license(self.key, "XC-ABCD-1234-EFGH", "halfyear")
+        migrated = migrate_license(self.key, source.code, "XC-WXYZ-5678-IJKL", customer="迁移用户")
+        payload = verify_license(migrated.code, migrated.device)
+        self.assertEqual(payload["exp"], source.expires_at)
+        self.assertEqual(payload["plan"], "halfyear")
+        self.assertEqual(payload["devices"], ["XC-WXYZ-5678-IJKL"])
 
     def test_self_test(self):
         report = self_test(PRIVATE_KEY)

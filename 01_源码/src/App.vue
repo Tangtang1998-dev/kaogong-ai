@@ -729,8 +729,8 @@ const GUIDES = {
   sync: {
     key: 'sync', icon: '💾', title: '数据同步与保存',
     desc: '换设备怎么接着用、数据怎么不丢，都在这页。',
-    features: ['⬆️ 上传本机备份 / ⬇️ 下载云端最新 / 🔀 智能合并（三键独立，不会误覆盖）', '☁️ Gitee / GitHub / WebDAV 三选一，可开自动互通', '💾 保存到本地文件夹（桌面端）+ 自动备份', '📤 导出全部数据 JSON / 手机端保存分享'],
-    tips: ['① 换设备时两端用同一种方案，然后点「🔀 智能合并」', '② 云同步只传学习数据；模型、Key、同步密码和外观设置始终只留在本机', '③ 重要数据建议再定期导出一次 JSON 兜底']
+    features: ['⬆️ 上传本机备份 / ⬇️ 下载云端最新 / 🔀 智能合并（三键独立，不会误覆盖）', '☁️ Gitee / GitHub / WebDAV 三选一，可开自动互通', '💎 会员随账号自助迁移：新设备同步同一账号即可恢复会员', '📤 导出全部数据 JSON / 手机端保存分享'],
+    tips: ['① 换设备时两端用同一种方案，然后点「🔀 智能合并」即可连会员记录一起迁移', '② 模型、API Key、同步密码和外观设置始终只留在本机', '③ 重要数据建议再定期导出一次 JSON 兜底']
   }
 }
 const guide = ref(null)
@@ -3545,6 +3545,11 @@ onUnmounted(() => {
     <b :style="{color: syncUi.remoteState === 'warn' ? 'var(--red)' : syncUi.remoteState === 'ok' ? 'var(--hud-cyan)' : 'var(--text2)'}">{{ syncUi.remote }}</b>
     <div style="font-size:calc(10.5px * var(--ui-fs-scale, 1));color:var(--text3);margin-top:3px">最近操作：{{ syncUi.action }} · {{ syncUi.actionT }}</div>
   </div>
+</div>
+<div style="margin:0 0 12px;padding:10px 12px;border:1px solid rgba(52,211,153,.38);border-radius:9px;background:rgba(52,211,153,.08);line-height:1.65">
+  <b>💎 会员随账号自助迁移</b>
+  <div style="margin-top:3px;color:var(--text2);font-size:calc(11.5px * var(--ui-fs-scale, 1))">手机购买后换到 iPad、电脑或安卓，只需在新设备填写同一个 Gitee / GitHub / WebDAV 同步账号，再点「⬇️ 下载云端最新」或「🔀 智能合并」。设备码与会员购买记录会一起迁移，不需要管理员手动签发。</div>
+  <div style="margin-top:3px;color:var(--text3);font-size:calc(10.5px * var(--ui-fs-scale, 1))">安全规则：智能合并只会选择权益更高的一份；云端旧试用记录不会把本机正式会员降级。不要把同步仓库或 WebDAV 账号分享给别人。</div>
 </div>
 <div class="sec-t">🇨🇳 Gitee 自动互通（国内推荐，网页/iPad/安卓免翻墙直连）</div>
         <div class="sec-desc" style="margin-top:4px">Gitee 是开源中国提供的国内代码托管平台，网页端允许跨域直连。每位用户填自己的 Gitee 私人令牌，系统会在“该令牌对应账户”下自动创建私人仓库 <b>xingce-ai-cloud-sync</b>；令牌只保存在本机，不会写入同步数据，也不需要 GitHub。</div>

@@ -1,6 +1,6 @@
 <script setup>
-import { ref, computed, watch } from 'vue'
-import { PLANS, licenseState, activateLicenseCode, licenseDeviceCode } from '../utils/license'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { PLANS, licenseState, activateLicenseCode, licenseDeviceCode, promotionState, planPrice } from '../utils/license'
 import { setClipboard } from '../utils/platform'
 
 const props = defineProps({ manual: { type: Boolean, default: false } })
@@ -9,17 +9,24 @@ const code = ref('')
 const busy = ref(false)
 const err = ref('')
 const copied = ref(false)
+const promoNow = ref(Date.now())
 const selectedPlanId = ref(PLANS.some((p) => p.id === licenseState.plan) ? licenseState.plan : 'month')
 
 const visible = computed(() => props.manual || (!licenseState.active && !licenseState.viewOnly))
 const expireText = computed(() => licenseState.expiresAt ? new Date(licenseState.expiresAt).toLocaleString('zh-CN') : '未激活')
 const selectedPlan = computed(() => PLANS.find((p) => p.id === selectedPlanId.value) || PLANS[0])
+const promo = computed(() => promotionState(promoNow.value))
 
 function selectPlan(id) { selectedPlanId.value = id }
+function displayPrice(plan) { return planPrice(plan, promoNow.value) }
 
 watch(() => props.manual, (open) => {
   if (open && PLANS.some((p) => p.id === licenseState.plan)) selectedPlanId.value = licenseState.plan
 })
+
+let promoTimer = null
+onMounted(() => { promoTimer = setInterval(() => { promoNow.value = Date.now() }, 30000) })
+onUnmounted(() => { if (promoTimer) clearInterval(promoTimer) })
 
 async function copyDevice() {
   const c = licenseDeviceCode()
@@ -65,6 +72,17 @@ function viewOnly() {
         <em v-else-if="licenseState.mode === 'trial'">剩余 {{ licenseState.trialDaysLeft }} 天 · {{ licenseState.trialPoints }} 点</em>
       </div>
 
+      <div v-if="licenseState.mode === 'trial'" class="license-points-rule">
+        <b>试用点数规则</b>
+        <p>普通 AI 对话每次消耗 5 点；错题整理、AI 出题、微课、萌宠分析等其他 AI 功能每次消耗 1 点。</p>
+        <p>点数耗尽后，所有 AI 功能会立即停止，不会继续调用模型；学习数据、错题和设置仍可查看与导出。</p>
+      </div>
+
+      <div v-if="promo.active" class="license-promo">
+        <b>限时活动</b>
+        <span>2026-09-20 周日 08:00–22:00，所有订阅立减 5 元，不与其他优惠叠加。</span>
+      </div>
+
       <div class="license-plans">
         <button
           v-for="p in PLANS"
@@ -76,21 +94,42 @@ function viewOnly() {
           @click="selectPlan(p.id)"
         >
           <div class="lp-top"><b>{{ p.name }}</b><span v-if="p.tag">{{ p.tag }}</span></div>
-          <strong>¥{{ p.price }}</strong>
+          <strong>¥{{ displayPrice(p) }}<del v-if="promo.active">¥{{ p.price }}</del></strong>
           <p>{{ p.days ? p.days + ' 天' : '考试周期' }}</p>
         </button>
       </div>
 
       <div class="license-detail">
-        <div class="ld-head"><b>{{ selectedPlan.name }}</b><span>¥{{ selectedPlan.price }} · {{ selectedPlan.days ? selectedPlan.days + ' 天' : '考试周期' }}</span></div>
+        <div class="ld-head"><b>{{ selectedPlan.name }}</b><span>¥{{ displayPrice(selectedPlan) }} · {{ selectedPlan.days ? selectedPlan.days + ' 天' : '考试周期' }}</span></div>
         <p>{{ selectedPlan.summary }}</p>
         <ul><li v-for="item in selectedPlan.details" :key="item">{{ item }}</li></ul>
+        <p v-if="promo.active" class="ld-promo">活动价已自动立减 5 元，原价 ¥{{ selectedPlan.price }}。</p>
       </div>
 
       <div class="license-buy">
         <b>购买方式</b>
         <p>请到粉丝群置顶消息扫描收款码。付款备注请填写设备码后四位，并将付款截图和设备码私发给管理员。</p>
         <p>收到激活码后，填入下方输入框即可解锁。离线版使用你自己的 API Key。</p>
+      </div>
+
+      <div class="license-notes">
+        <b>订阅须知与免责声明</b>
+        <ul>
+          <li>会员绑定购买时的设备码，一个激活码默认只对对应设备生效。</li>
+          <li>设备码和会员购买记录会作为独立的会员凭据包，随你自己配置的 Gitee、GitHub 或 WebDAV 私有同步账号迁移。换手机、iPad 或电脑时，在新设备的「数据同步」中下载云端或智能合并即可自助恢复会员。</li>
+          <li>请勿把同步仓库、WebDAV 账号或会员凭据包分享给他人，否则对方可能读取或冒用你的会员记录。</li>
+          <li>更换设备、卸载软件、清除浏览器站点数据、清除应用数据、恢复出厂设置、使用无痕模式、修改系统时间、使用非官方修改版本等个人操作导致会员丢失或失效的，本店概不负责；核对订单后可在合理范围内协助迁移。</li>
+          <li>激活码与到期时间以签发记录为准。请勿公开转发激活码，避免被他人滥用。</li>
+          <li>所有套餐均为一次付款、固定有效期，不自动续费、不自动扣款、不默认续约。</li>
+          <li>虚拟商品激活后不支持无理由退款；未激活且未使用的订单，请付款前与管理员确认规则。</li>
+          <li>本周日活动仅限 2026-09-20 08:00–22:00 内完成付款的订单，每种订阅立减 5 元；过期不补、不可追溯、不与其他优惠叠加。</li>
+        </ul>
+      </div>
+
+      <div class="license-migrate">
+        <b>跨设备会员自助迁移</b>
+        <p>换手机、iPad 或电脑时，在新设备打开「数据同步」，登录同一个 Gitee、GitHub 或 WebDAV 同步账号，再点「下载云端最新」或「智能合并」即可。</p>
+        <small>设备码和会员购买记录会随你自己的私有同步数据一起迁移，不需要再联系管理员手动签发。请勿把同步仓库或 WebDAV 账号分享给别人。</small>
       </div>
 
       <div class="license-device">
@@ -124,6 +163,9 @@ function viewOnly() {
 .license-status.ok { border-color: rgba(52,211,153,.35); background: rgba(52,211,153,.08); }
 .license-status span { color: var(--text3); font-size: 12px; }
 .license-status b { color: var(--text); }
+.license-points-rule { margin-top: 10px; padding: 10px 12px; border: 1px solid var(--glass-border); border-radius: 11px; background: rgba(127,127,127,.04); }
+.license-points-rule b { font-size: calc(12.5px * var(--ui-fs-scale, 1)); }
+.license-points-rule p { margin: 5px 0 0; color: var(--text2); font-size: calc(11px * var(--ui-fs-scale, 1)); line-height: 1.6; }
 .license-status em { grid-column: 1 / -1; color: var(--text3); font-size: calc(11px * var(--ui-fs-scale, 1)); font-style: normal; }
 .license-plans { display: grid; grid-template-columns: repeat(auto-fit, minmax(132px, 1fr)); gap: 8px; margin: 14px 0 10px; }
 .license-plan { min-width: 0; padding: 10px; border: 1px solid var(--glass-border); border-radius: 10px; background: rgba(127,127,127,.06); color: var(--text); text-align: left; cursor: pointer; font: inherit; }
@@ -141,10 +183,21 @@ function viewOnly() {
 .ld-head span { color: var(--accent); font-size: 11px; white-space: nowrap; }
 .license-detail p { margin: 6px 0 4px; color: var(--text2); font-size: calc(11.5px * var(--ui-fs-scale, 1)); line-height: 1.55; }
 .license-detail ul { margin: 4px 0 0; padding-left: 17px; color: var(--text3); font-size: calc(11px * var(--ui-fs-scale, 1)); line-height: 1.65; }
+.ld-promo { color: var(--accent) !important; font-weight: 600; }
+.license-promo { display: flex; gap: 8px; align-items: flex-start; margin-top: 10px; padding: 9px 11px; border-radius: 11px; color: #9a5a00; background: #fff5d6; border: 1px solid #f1cf73; font-size: calc(11px * var(--ui-fs-scale, 1)); }
+.license-promo b { flex: 0 0 auto; }
+.license-plan strong del { margin-left: 6px; color: var(--text3); font-size: 11px; font-weight: 400; }
 .license-buy, .license-device, .license-activate { border: 1px solid var(--glass-border); border-radius: 11px; background: rgba(127,127,127,.045); }
 .license-buy { padding: 10px 12px; }
 .license-buy b { font-size: calc(13px * var(--ui-fs-scale, 1)); }
 .license-buy p { margin: 5px 0 0; color: var(--text2); font-size: calc(11.5px * var(--ui-fs-scale, 1)); line-height: 1.65; }
+.license-notes, .license-migrate { margin-top: 10px; padding: 10px 12px; border: 1px solid var(--glass-border); border-radius: 11px; background: rgba(127,127,127,.04); }
+.license-notes b, .license-migrate b { font-size: calc(12.5px * var(--ui-fs-scale, 1)); }
+.license-notes ul { margin: 7px 0 0; padding-left: 17px; color: var(--text2); font-size: calc(10.5px * var(--ui-fs-scale, 1)); line-height: 1.65; }
+.license-migrate p { margin: 6px 0; color: var(--text2); font-size: calc(11px * var(--ui-fs-scale, 1)); line-height: 1.6; }
+.license-migrate input { width: 100%; box-sizing: border-box; padding: 8px 10px; border: 1px solid var(--glass-border); border-radius: 8px; background: rgba(127,127,127,.05); color: var(--text); outline: none; }
+.license-migrate button { margin-top: 8px; padding: 8px 12px; border: 1px solid var(--accent); border-radius: 8px; background: transparent; color: var(--accent); cursor: pointer; font: inherit; }
+.license-migrate small { display: block; margin-top: 7px; color: var(--text3); line-height: 1.55; }
 .license-device { display: flex; align-items: center; gap: 8px; margin-top: 10px; padding: 8px 10px; }
 .license-device span { flex: 0 0 auto; color: var(--text3); font-size: 11px; }
 .license-device code { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--accent); font-size: 12px; }

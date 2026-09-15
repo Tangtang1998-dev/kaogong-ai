@@ -25,6 +25,7 @@ from license_core import (
     generate_license,
     load_private_key,
     locate_private_key,
+    migrate_license,
     normalize_device_code,
     self_test,
     verify_license,
@@ -175,15 +176,18 @@ class LicenseAdminApp(tk.Tk):
         self.single_tab = tk.Frame(self.notebook, bg=BG)
         self.batch_tab = tk.Frame(self.notebook, bg=BG)
         self.history_tab = tk.Frame(self.notebook, bg=BG)
+        self.migrate_tab = tk.Frame(self.notebook, bg=BG)
         self.help_tab = tk.Frame(self.notebook, bg=BG)
         self.notebook.add(self.single_tab, text="单用户授权")
         self.notebook.add(self.batch_tab, text="批量授权")
         self.notebook.add(self.history_tab, text="授权记录")
+        self.notebook.add(self.migrate_tab, text="会员迁移")
         self.notebook.add(self.help_tab, text="使用说明")
 
         self._build_single_tab()
         self._build_batch_tab()
         self._build_history_tab()
+        self._build_migrate_tab()
         self._build_help_tab()
         self._build_statusbar()
 
@@ -425,6 +429,85 @@ class LicenseAdminApp(tk.Tk):
         self._button(actions, "导出备份", self.export_history).pack(side="left")
         self._button(actions, "打开记录文件夹", self.open_records_folder).pack(side="left", padx=6)
 
+    def _build_migrate_tab(self) -> None:
+        wrapper = tk.Frame(self.migrate_tab, bg=BG)
+        wrapper.pack(fill="both", expand=True, padx=2, pady=8)
+        wrapper.grid_columnconfigure(0, weight=5, uniform="migrate")
+        wrapper.grid_columnconfigure(1, weight=6, uniform="migrate")
+        wrapper.grid_rowconfigure(0, weight=1)
+
+        form = self._card(wrapper)
+        form.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
+        result = self._card(wrapper)
+        result.grid(row=0, column=1, sticky="nsew", padx=(8, 0))
+
+        self._label(form, "会员迁移", size=14, bold=True).pack(anchor="w", padx=22, pady=(18, 2))
+        self._subtitle(form, "验证旧激活码后，为新设备签发一个保留剩余有效期的新激活码。").pack(anchor="w", padx=22, pady=(0, 14))
+
+        self.migrate_old_var = tk.StringVar()
+        self.migrate_new_device_var = tk.StringVar()
+        self.migrate_customer_var = tk.StringVar()
+        self.migrate_order_var = tk.StringVar()
+
+        self._label(form, "旧激活码", bold=True).pack(anchor="w", padx=22, pady=(0, 5))
+        self.migrate_old_text = tk.Text(form, height=7, wrap="char", relief="flat", bd=0, bg="#F8FAFC", fg=TEXT, padx=10, pady=9, font=("Consolas", 9), highlightthickness=1, highlightbackground=BORDER)
+        self.migrate_old_text.pack(fill="x", padx=22)
+        self._field(form, "新设备码 *", self.migrate_new_device_var, top=12)
+        self._field(form, "客户名称", self.migrate_customer_var, top=12)
+        self._field(form, "订单号", self.migrate_order_var, top=12)
+
+        self.migrate_button = self._button(form, "验证并生成迁移码", self.generate_migration, primary=True)
+        self.migrate_button.pack(fill="x", padx=22, pady=(18, 20), ipady=5)
+
+        self._label(result, "迁移结果", size=14, bold=True).pack(anchor="w", padx=22, pady=(18, 2))
+        self._subtitle(result, "新激活码保留原套餐和原到期时间，不会重新计算时长。").pack(anchor="w", padx=22, pady=(0, 12))
+        self.migrate_result_meta = tk.Frame(result, bg=SOFT_BLUE, highlightbackground="#C9D9FF", highlightthickness=1)
+        self.migrate_result_meta.pack(fill="x", padx=22, pady=(0, 12))
+        self.migrate_result_plan_var = tk.StringVar(value="等待迁移")
+        self.migrate_result_device_var = tk.StringVar(value="-")
+        self.migrate_result_expire_var = tk.StringVar(value="-")
+        self.migrate_result_id_var = tk.StringVar(value="-")
+        self._result_meta(self.migrate_result_meta, "套餐", self.migrate_result_plan_var)
+        self._result_meta(self.migrate_result_meta, "新设备", self.migrate_result_device_var)
+        self._result_meta(self.migrate_result_meta, "原到期时间", self.migrate_result_expire_var)
+        self._result_meta(self.migrate_result_meta, "迁移编号", self.migrate_result_id_var)
+
+        self._label(result, "新激活码", bold=True).pack(anchor="w", padx=22)
+        self.migrate_code_text = tk.Text(result, height=7, wrap="char", relief="flat", bd=0, bg="#F8FAFC", fg=TEXT, padx=10, pady=9, font=("Consolas", 9), highlightthickness=1, highlightbackground=BORDER)
+        self.migrate_code_text.pack(fill="x", padx=22, pady=(5, 10))
+        self.migrate_code_text.configure(state="disabled")
+        self._button(result, "复制迁移激活码", self.copy_migration_code, primary=True).pack(anchor="w", padx=22, pady=(0, 18))
+
+    def generate_migration(self) -> None:
+        try:
+            key = self._require_key()
+            result = migrate_license(
+                key,
+                self.migrate_old_text.get("1.0", "end").strip(),
+                self.migrate_new_device_var.get(),
+                customer=self.migrate_customer_var.get(),
+                order_id=self.migrate_order_var.get(),
+            )
+            self.records.append(result)
+            self.current_migration = result
+            self.migrate_result_plan_var.set(result.label)
+            self.migrate_result_device_var.set(result.device)
+            self.migrate_result_expire_var.set(result.expire_text)
+            self.migrate_result_id_var.set(result.license_id)
+            self._set_text(self.migrate_code_text, result.code)
+            self.refresh_history()
+            self.set_status(f"会员迁移码已生成：{result.license_id}")
+        except (LicenseError, OSError) as exc:
+            messagebox.showerror("无法生成迁移码", str(exc), parent=self)
+            self.set_status(str(exc))
+
+    def copy_migration_code(self) -> None:
+        result = getattr(self, "current_migration", None)
+        if not result:
+            self.set_status("还没有可复制的迁移码。")
+            return
+        self._copy(result.code, "迁移激活码已复制。")
+
     def _build_help_tab(self) -> None:
         card = self._card(self.help_tab)
         card.pack(fill="both", expand=True, padx=2, pady=8)
@@ -439,6 +522,9 @@ class LicenseAdminApp(tk.Tk):
 
 批量授权
 每行格式为：设备码,客户名称,订单号,备注。导入 CSV 时支持 device、customer、order_id、note 表头，也支持上述列顺序。批量生成完成后可一键导出结果。
+
+会员迁移
+客户更换手机、iPad 或电脑后，在“会员迁移”页粘贴旧激活码和新设备码。工具会校验旧授权，按原套餐和原到期时间签发新设备激活码。迁移不会撤销旧激活码，旧设备在到期前仍可能继续使用；如需严格限制单设备，需要额外服务端设备登记。
 
 安全规则
 1. 私钥文件 private-key.json 是最高机密，绝不能发给客户、上传群文件或提交到代码仓库。

@@ -37,8 +37,10 @@ const expiryArg = String(arg('expire', '')).trim()
 let exp = 0
 let label = ''
 
-if (plan === 'month') { exp = addDays(now, 30); label = '标准月付' }
-else if (plan === 'quarter') { exp = addDays(now, 90); label = '标准季度付' }
+if (plan === 'month') { exp = addDays(now, 30); label = '单月订阅' }
+else if (plan === 'quarter') { exp = addDays(now, 90); label = '季度订阅' }
+else if (plan === 'halfyear') { exp = addDays(now, 180); label = '半年卡' }
+else if (plan === 'year') { exp = addDays(now, 365); label = '年卡' }
 else if (plan === 'gk') { exp = new Date('2026-12-06T23:59:59+08:00').getTime(); label = '国考季票' }
 else if (plan === 'province') { exp = expiryArg ? new Date(expiryArg + 'T23:59:59+08:00').getTime() : 0; label = '省考季票' }
 else { console.error('未知套餐：' + plan); process.exit(2) }

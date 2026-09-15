@@ -45,8 +45,41 @@ describe('cloudSync 多端安全合并', () => {
     expect(shouldSyncKey('xc_recent_qs')).toBe(true)
     expect(shouldSyncKey('xc_auth')).toBe(false)
     expect(shouldSyncKey('xc_pet_pos_d')).toBe(false)
-    const scoped = syncScopeFromBackup({ data: { xc_msgs: '[]', xc_cfg: '{}', xc_pet_pos_d: '{}', xc_pet: '{}' } })
+    expect(shouldSyncKey('xc_offline_license_v1')).toBe(false)
+    expect(shouldSyncKey('xc_device_code_v1')).toBe(false)
+    expect(shouldSyncKey('xc_offline_trial_v1')).toBe(false)
+    const scoped = syncScopeFromBackup({ data: { xc_msgs: '[]', xc_cfg: '{}', xc_pet_pos_d: '{}', xc_pet: '{}', xc_offline_license_v1: '{}', xc_device_code_v1: 'XC-LOCAL-0000-0000', xc_offline_trial_v1: '{}' } })
     expect(Object.keys(scoped).sort()).toEqual(['xc_msgs', 'xc_pet'])
+  })
+
+  it('云端旧授权字段不会覆盖本机授权码、设备码和试用状态', () => {
+    testMem.clear()
+    const local = {
+      xc_offline_license_v1: JSON.stringify({ code: 'LOCAL-LICENSE' }),
+      xc_device_code_v1: 'XC-LOCAL-0000-0000',
+      xc_offline_trial_v1: JSON.stringify({ points: 17, start: 1690000000000 }),
+      xc_msgs: JSON.stringify([{ id: 'local-msg', t: 1690000000100 }])
+    }
+    for (const [k, v] of Object.entries(local)) testMem.set(k, v)
+    const remote = {
+      data: {
+        xc_offline_license_v1: JSON.stringify({ code: 'STALE-CLOUD-LICENSE' }),
+        xc_device_code_v1: 'XC-CLOUD-9999-9999',
+        xc_offline_trial_v1: JSON.stringify({ points: 30, start: 0 }),
+        xc_msgs: JSON.stringify([{ id: 'remote-msg', t: 1690000000200 }])
+      }
+    }
+    const env = makeCloudEnvelope(remote.data)
+    expect(env.data.xc_offline_license_v1).toBeUndefined()
+    expect(env.data.xc_device_code_v1).toBeUndefined()
+    expect(env.data.xc_offline_trial_v1).toBeUndefined()
+    const plan = applyLocalMerge({ data: local }, remote, {})
+    expect(plan.merged.xc_offline_license_v1).toBeUndefined()
+    expect(plan.merged.xc_device_code_v1).toBeUndefined()
+    expect(plan.merged.xc_offline_trial_v1).toBeUndefined()
+    expect(testMem.get('xc_offline_license_v1')).toBe(local.xc_offline_license_v1)
+    expect(testMem.get('xc_device_code_v1')).toBe(local.xc_device_code_v1)
+    expect(testMem.get('xc_offline_trial_v1')).toBe(local.xc_offline_trial_v1)
   })
 
   it('设置与密钥不进入云同步，但本机现有配置保持不变', () => {

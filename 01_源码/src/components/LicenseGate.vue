@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { PLANS, licenseState, activateLicenseCode, licenseDeviceCode } from '../utils/license'
 import { setClipboard } from '../utils/platform'
 
@@ -9,9 +9,17 @@ const code = ref('')
 const busy = ref(false)
 const err = ref('')
 const copied = ref(false)
+const selectedPlanId = ref(PLANS.some((p) => p.id === licenseState.plan) ? licenseState.plan : 'month')
 
 const visible = computed(() => props.manual || (!licenseState.active && !licenseState.viewOnly))
 const expireText = computed(() => licenseState.expiresAt ? new Date(licenseState.expiresAt).toLocaleString('zh-CN') : '未激活')
+const selectedPlan = computed(() => PLANS.find((p) => p.id === selectedPlanId.value) || PLANS[0])
+
+function selectPlan(id) { selectedPlanId.value = id }
+
+watch(() => props.manual, (open) => {
+  if (open && PLANS.some((p) => p.id === licenseState.plan)) selectedPlanId.value = licenseState.plan
+})
 
 async function copyDevice() {
   const c = licenseDeviceCode()
@@ -58,11 +66,25 @@ function viewOnly() {
       </div>
 
       <div class="license-plans">
-        <article v-for="p in PLANS" :key="p.id" class="license-plan" :class="{ hot: p.id === 'quarter' }">
+        <button
+          v-for="p in PLANS"
+          :key="p.id"
+          type="button"
+          class="license-plan"
+          :class="{ hot: p.id === 'quarter', on: p.id === selectedPlanId }"
+          :aria-pressed="p.id === selectedPlanId"
+          @click="selectPlan(p.id)"
+        >
           <div class="lp-top"><b>{{ p.name }}</b><span v-if="p.tag">{{ p.tag }}</span></div>
           <strong>¥{{ p.price }}</strong>
           <p>{{ p.days ? p.days + ' 天' : '考试周期' }}</p>
-        </article>
+        </button>
+      </div>
+
+      <div class="license-detail">
+        <div class="ld-head"><b>{{ selectedPlan.name }}</b><span>¥{{ selectedPlan.price }} · {{ selectedPlan.days ? selectedPlan.days + ' 天' : '考试周期' }}</span></div>
+        <p>{{ selectedPlan.summary }}</p>
+        <ul><li v-for="item in selectedPlan.details" :key="item">{{ item }}</li></ul>
       </div>
 
       <div class="license-buy">
@@ -103,14 +125,22 @@ function viewOnly() {
 .license-status span { color: var(--text3); font-size: 12px; }
 .license-status b { color: var(--text); }
 .license-status em { grid-column: 1 / -1; color: var(--text3); font-size: calc(11px * var(--ui-fs-scale, 1)); font-style: normal; }
-.license-plans { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin: 14px 0; }
-.license-plan { min-width: 0; padding: 10px; border: 1px solid var(--glass-border); border-radius: 10px; background: rgba(127,127,127,.06); }
+.license-plans { display: grid; grid-template-columns: repeat(auto-fit, minmax(132px, 1fr)); gap: 8px; margin: 14px 0 10px; }
+.license-plan { min-width: 0; padding: 10px; border: 1px solid var(--glass-border); border-radius: 10px; background: rgba(127,127,127,.06); color: var(--text); text-align: left; cursor: pointer; font: inherit; }
+.license-plan:hover { border-color: var(--accent); }
+.license-plan.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
 .license-plan.hot { border-color: var(--accent); background: var(--accent2); }
 .lp-top { display: flex; align-items: center; justify-content: space-between; gap: 4px; }
 .lp-top b { font-size: calc(12px * var(--ui-fs-scale, 1)); }
 .lp-top span { color: var(--accent); font-size: 9px; white-space: nowrap; }
 .license-plan strong { display: block; margin-top: 8px; font-size: calc(20px * var(--ui-fs-scale, 1)); }
 .license-plan p { margin: 3px 0 0; color: var(--text3); font-size: 11px; }
+.license-detail { margin-bottom: 12px; padding: 10px 12px; border: 1px solid var(--glass-border); border-radius: 11px; background: rgba(127,127,127,.04); }
+.ld-head { display: flex; justify-content: space-between; gap: 8px; align-items: center; }
+.ld-head b { font-size: calc(13px * var(--ui-fs-scale, 1)); }
+.ld-head span { color: var(--accent); font-size: 11px; white-space: nowrap; }
+.license-detail p { margin: 6px 0 4px; color: var(--text2); font-size: calc(11.5px * var(--ui-fs-scale, 1)); line-height: 1.55; }
+.license-detail ul { margin: 4px 0 0; padding-left: 17px; color: var(--text3); font-size: calc(11px * var(--ui-fs-scale, 1)); line-height: 1.65; }
 .license-buy, .license-device, .license-activate { border: 1px solid var(--glass-border); border-radius: 11px; background: rgba(127,127,127,.045); }
 .license-buy { padding: 10px 12px; }
 .license-buy b { font-size: calc(13px * var(--ui-fs-scale, 1)); }

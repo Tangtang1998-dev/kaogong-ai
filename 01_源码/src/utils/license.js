@@ -10,10 +10,12 @@ const TRIAL_POINTS = 30
 const PUBLIC_JWK = { kty: 'EC', crv: 'P-256', x: '_eTtxfkTlCNxT5oL_JlxK9Vy5poKtJrNPhPl738Ctlo', y: 'ofbmtixWhaQQTyFgirnWvB7CLdkR7Pys7exu04RDLhc' }
 
 export const PLANS = [
-  { id: 'month', name: '标准月付', price: 39, days: 30, tag: '短期使用' },
-  { id: 'quarter', name: '标准季度付', price: 99, days: 90, tag: '推荐' },
-  { id: 'gk', name: '国考季票', price: 129, exam: 'national', tag: '到国考笔试后 7 天' },
-  { id: 'province', name: '省考季票', price: 129, exam: 'province', tag: '到所选省考笔试后 7 天' }
+  { id: 'month', name: '单月订阅', price: 39, days: 30, tag: '短期使用', summary: '一次购买，连续使用 30 天', details: ['适合短期冲刺或先体验完整功能', '到期后不自动续费，也不自动扣款', '续费时继续使用当前设备码重新签发'] },
+  { id: 'quarter', name: '季度订阅', price: 99, days: 90, tag: '推荐', summary: '一次购买，连续使用 90 天', details: ['适合较长备考周期，平均使用成本更低', '到期后不自动扣款', '授权仍绑定当前设备码'] },
+  { id: 'halfyear', name: '半年卡', price: 169, days: 180, tag: '半年备考', summary: '一次购买，连续使用 180 天', details: ['适合半年以上系统备考', '到期后不自动扣款，无需绑定支付账户', '授权仍绑定当前设备码，续期时重新签发'] },
+  { id: 'year', name: '年卡', price: 299, days: 365, tag: '长期备考', summary: '一次购买，连续使用 365 天', details: ['适合全年国考、省考连续备考', '到期后不自动扣款，不会有隐藏续费', '一年内无需重复购买，授权仍绑定当前设备码'] },
+  { id: 'gk', name: '国考季票', price: 129, exam: 'national', tag: '考试周期', summary: '覆盖国考备考周期至笔试结束', details: ['有效期至 2026-12-06 国考笔试结束', '适合全程备考国考的考生', '到期后不自动续费'] },
+  { id: 'province', name: '省考季票', price: 129, exam: 'province', tag: '考试周期', summary: '覆盖指定省份省考备考周期', details: ['有效期按所选省考考试周期签发', '适合明确参加某一省省考的考生', '续期或考试时间变化时重新签发新码'] }
 ]
 
 export const licenseState = reactive({

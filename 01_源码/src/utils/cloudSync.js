@@ -16,10 +16,12 @@ const LOCAL_ONLY_KEYS = new Set([
   'xc_draft_mode', 'xc_draft_size', 'xc_draft_mini_pos', 'xc_weak_toast',
   'xc_wq_due_tip', 'xc_pdf_tree', 'xc_pdf_tree_name', 'xc_pdf_online_order',
   'xc_native_tree', 'xc_native_tree_name', 'xc_tts_migrated', 'xc_wq_subj_v1',
-  'xc_sync_state', 'xc_sync_device_id'
+  'xc_sync_state', 'xc_sync_device_id',
+  'xc_offline_license_v1', 'xc_device_code_v1', 'xc_offline_trial_v1'
 ])
 const LOCAL_ONLY_PREFIXES = [
-  'xc_pet_pos_', 'xc_music_pos_', 'xc_pet_panel_pos_', 'xc_draft_mini_pos_'
+  'xc_pet_pos_', 'xc_music_pos_', 'xc_pet_panel_pos_', 'xc_draft_mini_pos_',
+  'xc_offline_license_', 'xc_device_code_', 'xc_offline_trial_', 'xc_license_'
 ]
 
 export function shouldSyncKey(k) {

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { licenseState, licenseInit, consumeLicensePoints, verifyLicenseCode } from '../utils/license'
+import { PLANS, licenseState, licenseInit, consumeLicensePoints, verifyLicenseCode } from '../utils/license'
 
 const mem = new Map()
 globalThis.localStorage = {
@@ -25,6 +25,12 @@ describe('离线授权', () => {
     expect((await verifyLicenseCode(CODE, 'XC-TEST-0000-0001')).ok).toBe(true)
     expect((await verifyLicenseCode(CODE, 'XC-TEST-9999-9999')).ok).toBe(false)
     expect((await verifyLicenseCode(CODE.replace('XC1.', 'XC2.'), 'XC-TEST-0000-0001')).ok).toBe(false)
+  })
+
+  it('正式版套餐包含月、季度、半年和年卡，且均无自动扣款', async () => {
+    expect(PLANS.map((p) => p.id)).toEqual(['month', 'quarter', 'halfyear', 'year', 'gk', 'province'])
+    expect(PLANS.find((p) => p.id === 'halfyear')).toMatchObject({ price: 169, days: 180 })
+    expect(PLANS.find((p) => p.id === 'year')).toMatchObject({ price: 299, days: 365 })
   })
 
   it('首次运行自动开始 7 天 30 点试用', async () => {

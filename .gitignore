@@ -299,6 +299,15 @@ node_modules/
 /10_授权工具/private-key.json
 /10_授权工具/smoke-*.png
 /10_授权工具/__pycache__/
+/10_授权工具/admin/__pycache__/
+/10_授权工具/admin/app.ico
+/10_授权工具/admin/build/
+/10_授权工具/admin/dist/
+/10_授权工具/admin/self-test.json
+/10_授权工具/admin/ui-preview.png
+/10_授权工具/admin/授权记录/
+/10_授权工具/admin/*.spec
+/10_授权工具/发布版/
 
 # 独立交付仓库：各自维护 Git，不纳入主仓
 /08_OfflinePaidWeb/

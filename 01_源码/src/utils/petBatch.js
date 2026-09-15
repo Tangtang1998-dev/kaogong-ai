@@ -17,12 +17,12 @@ function cleanImg(img) {
   return String(img || '').startsWith('data:') ? img : ''
 }
 
-function msgText(m) {
+export function msgText(m) {
   if (!m) return ''
   return typeof m.content === 'string' ? m.content : String((m.content && m.content.text) || '')
 }
 
-function explainFrom(reply) {
+export function explainFrom(reply) {
   let t = String(reply || '').replace(/<[^>]+>/g, ' ').trim()
   const i = t.search(/(?:^|\n)\s*(?:【?解析|答案解析|答案详解|讲解)[^。\n]{0,12}[:：]?/i)
   if (i >= 0) {
@@ -33,7 +33,7 @@ function explainFrom(reply) {
   return t.slice(0, 1800)
 }
 
-function rawToQuiz(text) {
+export function rawToQuiz(text) {
   const raw = String(text || '').replace(/<[^>]+>/g, ' ').trim()
   if (!raw) return null
   const q = parseQuiz(raw)
@@ -57,7 +57,7 @@ function parseJsonFrom(raw) {
 const READ_IMAGE_PROMPT =
   '你是公考行测题目录入助手。请把这张截图里的行测题目完整提取出来：题干和问法逐字保留，A/B/C/D 四个选项完整列出，图中明显标注的标准答案如有则填 A-D，没有就留空。不要写解析，不要额外文字。只输出 JSON：{"stem":"...","options":["A. ...","B. ...","C. ...","D. ..."],"answer":"A-D 或空"}'
 
-async function ocrImage(dataUrl, hint = '') {
+export async function ocrImage(dataUrl, hint = '') {
   const c = activeCfg(true)
   if (c && c.key && supportsVision(c)) {
     const content = [

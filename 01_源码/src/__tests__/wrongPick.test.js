@@ -1,6 +1,7 @@
 // wrongPick（截图/出题卡存错题取题源）回归
 import { describe, it, expect } from 'vitest'
 import { quizTextOf, pickWrongSource } from '../utils/wrongPick'
+import { rawToQuiz, explainFrom } from '../utils/petBatch'
 const mkQuiz = (extra = {}) => ({ role: 'assistant', quiz: { stem: '材料…问基期是多少？', options: [{ k: 'A', t: '100' }, { k: 'B', t: '120' }], answer: 'B' }, ...extra })
 describe('quizTextOf', () => {
   it('组装题干与 A-D 选项', () => {
@@ -40,5 +41,22 @@ describe('pickWrongSource', () => {
     ]
     const r = pickWrongSource(msgs, 1)
     expect(r.q).toContain('早期问题A')
+  })
+})
+
+describe('截图存错题完整整理', () => {
+  it('OCR 文本会被整理成题干、A-D 选项和答案', () => {
+    const qz = rawToQuiz('某市2025年GDP同比增长5.2%，问增长量约是多少？\nA. 100亿元\nB. 120亿元\nC. 140亿元\nD. 160亿元\n答案：B')
+    expect(qz).toBeTruthy()
+    expect(qz.stem).toContain('GDP')
+    expect(qz.options.length).toBe(4)
+    expect(qz.answer).toBe('B')
+  })
+
+  it('AI 回复中的答案解析会被提取为错题解析', () => {
+    const reply = '正确答案是 B。\n\n解析：先定位现期量和增长率，再用增长量公式计算，A/C/D 的数值均与材料口径不符。'
+    const exp = explainFrom(reply)
+    expect(exp).toContain('现期量')
+    expect(exp).toContain('A/C/D')
   })
 })

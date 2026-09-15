@@ -3,7 +3,7 @@ import { ref, reactive, nextTick, computed, onMounted, onUnmounted, watch, defin
 import 'katex/dist/katex.min.css'
 import { renderMd } from '../utils/renderMd'
 import { AI_DISTILL_MAP, USAGE_GUIDE } from '../utils/usageGuide'
-import { parseQuiz, parseQuizBatch, quizRequestCount, extractChoices, looksLikeQuiz, isQuizAsk } from '../utils/quiz'
+import { parseQuiz, parseQuizBatch, quizRequestCount, extractChoices, looksLikeQuiz, isQuizAsk, answerLetter } from '../utils/quiz'
 import { downloadMdScreenshot, snapshotMd } from '../utils/capture' // v3.8.215 截图分享(整幅渲染)
 import { saveImage } from '../utils/downloadOut' // v3.8.214 统一保存出口
 import { setClipboard } from '../utils/platform' // ★剪贴板走宿主桥（5+下用系统剪贴板）
@@ -59,6 +59,7 @@ import { recallBlock } from '../utils/recall' // v3.8.205 追问召回本人错�
 import { loadSrs } from '../utils/memorySrs' // v3.8.205 记忆召回数据源
 import { calcRecheck } from '../utils/verifyCalc' // v3.8.205 数值本地复核
 import { pickWrongSource } from '../utils/wrongPick' // 截图/出题卡存错题取“题目全文”
+import { ocrImage, rawToQuiz, explainFrom, msgText } from '../utils/petBatch' // 截图存错题复用萌宠的完整题目整理链路
 import { resolveVariant, variantStepPrompt } from '../data/solveSteps' // v3.8.192 题型分步模板
 import { speak, stopSpeak, speaking, pauseSpeak, resumeSpeak, speakPaused, setGaplessRate, ttsStatus, startRecog, recogActive } from '../utils/tts'
 import { ttsCacheCoverage, prefetchTts, ttsChunkPlan } from '../utils/ttsEngine'
@@ -1482,14 +1483,40 @@ async function confirmSaveWrong() {
   const raw = bkOrigin.value.imgs || []
   const imgs = []
   for (const it of raw) imgs.push(it.startsWith('data:') ? await compressImage(it) : it)
-  const qRaw = (bkOrigin.value.q || '').trim()
-  const q = (qRaw || (imgs.length ? '（截图题目，见下方原图；建议配置可识图模型或图形增强以自动识别文字）' : '')).slice(0, 3000)
-  addWrong({
+  let qRaw = (bkOrigin.value.q || '').trim()
+  let qz = rawToQuiz(qRaw)
+  const aiMsg = bkOrigin.value.msg || store.msgs[bkOrigin.value.msgIdx] || null
+  const aiText = msgText(aiMsg)
+  const needOcr = !!raw.length && (!qz || !Array.isArray(qz.options) || qz.options.length < 2 || String(qz.stem || '').trim().length < 12)
+  if (needOcr) {
+    showToast('正在整理截图中的题干、选项和答案…', 'info')
+    try {
+      const ocr = await ocrImage(raw[0], String(lastAskText || '').trim())
+      if (ocr && ocr.text) {
+        qRaw = String(ocr.text).trim()
+        qz = rawToQuiz(qRaw)
+      }
+    } catch (e) {}
+  }
+  if (!qz) qz = { stem: qRaw, options: [], answer: '' }
+  const opts = (qz.options || []).map((o) => {
+    const k = String((o && o.k) || '').trim()
+    const t = String((o && o.t) || o || '').replace(/<[^>]+>/g, ' ').trim()
+    return k ? k + '. ' + t : t
+  }).filter(Boolean)
+  const stem = String(qz.stem || qRaw || (imgs.length ? '（截图题目，见下方原图）' : '')).trim()
+  const question = (stem + (opts.length ? '\n\n' + opts.join('\n') : '')).slice(0, 6000)
+  const answer = qz.answer || answerLetter(aiText) || ''
+  const explain = explainFrom(aiText)
+  const saved = addWrong({
     id: Date.now(),
     subject: bkPick.value,
-    question: q,
+    question,
     imgs,
     msgIdx: bkOrigin.value.msgIdx,
+    answer: answer ? '正确答案 ' + answer : '',
+    explain,
+    note: explain ? '保存时已自动整理题干、选项和 AI 解析' : (needOcr && qRaw ? '保存时已用视觉模型整理截图题干与选项' : '截图题已保存，解析可在错题详解中继续补充'),
     reasons: [],
     time: new Date().toLocaleString(),
     at: Date.now(),
@@ -1498,6 +1525,10 @@ async function confirmSaveWrong() {
     mastery: 0,
     digested: false
   })
+  if (!saved || saved.ok === false) {
+    showToast('保存失败，请检查题目内容后重试', 'error')
+    return
+  }
   saveWqs()
   if (bkOrigin.value.msg) {
     bkOrigin.value.msg._wrongSaved = true

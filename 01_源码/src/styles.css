@@ -2996,9 +2996,14 @@ body[data-theme='light'] .app { background: rgba(247, 250, 254, 0.92); backdrop-
   pointer-events: none;
 }
 .composer-main { flex:1 1 auto; min-width:min(720px, 58vw); display:flex; flex-direction:column; gap:4px; }
-.composer-quickbar { display:flex; align-items:center; gap:5px; min-width:0; overflow-x:auto; padding:0 3px; scrollbar-width:none; }
+.composer-quickrow { display:flex; align-items:center; gap:4px; min-width:0; }
+.composer-quickbar { flex:1 1 auto; display:flex; align-items:center; gap:5px; min-width:0; overflow-x:auto; padding:0 3px; scrollbar-width:none; }
 .composer-quickbar::-webkit-scrollbar { display:none; }
 .composer-quickbar > span { flex:0 0 auto; color:var(--text3); font-size:calc(10px * var(--ui-fs-scale, 1)); font-weight:800; letter-spacing:.06em; }
+.cq-toggle { flex:0 0 auto; display:inline-flex; align-items:center; justify-content:center; width:30px; height:30px; padding:0; border:1px solid var(--glass-border); border-radius:50%; background:var(--surface); color:var(--text2); font:inherit; font-size:calc(13px * var(--ui-fs-scale, 1)); line-height:1; cursor:pointer; transition:transform .14s, border-color .14s, color .14s, background .14s; }
+.cq-toggle:hover { transform:translateY(-1px); border-color:var(--glass-border-hi); color:var(--accent); background:var(--accent2); }
+.cq-toggle:active { transform:scale(.96); }
+.cq-toggle.on { border-color:var(--accent); color:var(--accent); background:var(--accent2); }
 .cq-btn { flex:0 0 auto; padding:3px 8px; border:1px solid var(--glass-border); border-radius:999px; background:var(--surface); color:var(--text2); font:inherit; font-size:calc(11px * var(--ui-fs-scale, 1)); cursor:pointer; transition:transform .14s, border-color .14s, color .14s, background .14s; }
 .cq-btn:hover { transform:translateY(-1px); border-color:var(--glass-border-hi); color:var(--accent); background:var(--accent2); }
 .cq-btn:active { transform:scale(.97); }
@@ -5924,4 +5929,61 @@ body[data-theme='light'] .tab-order-row { background:#f7faf9; }
 }
 @media (min-width: 641px) {
   .composer-collapse { display: none !important; }
+}
+
+/* ===== v3.8.358 手机输入区紧凑化：输入框更矮，“常用”可小图标展开 ===== */
+@media (max-width: 640px) {
+  .input-bar { padding: 6px 8px; }
+  .e-dock { gap: 5px; padding: 4px; border-radius: 18px; }
+  .composer-main { gap: 2px; }
+  .composer-quickrow { min-height: 31px; }
+  .cq-toggle { width: 31px; height: 31px; min-width: 31px; font-size: 14px; }
+  .composer-quickbar { padding: 0; }
+  .cq-btn { min-height: 30px; padding: 2px 7px; font-size: calc(10.5px * var(--ui-fs-scale, 1)); }
+  .e-dock textarea {
+    min-height: 46px;
+    max-height: 132px;
+    padding: 7px 9px;
+    border-radius: 14px;
+    font-size: calc(14px * var(--ui-fs-scale, 1));
+    line-height: 1.42;
+  }
+  .dock-more {
+    gap: 6px;
+    max-height: min(34vh, 260px);
+    padding: 7px;
+    border-radius: 12px;
+  }
+  .dock-more .dock-hd {
+    padding: 0 2px 5px;
+    margin-bottom: 1px;
+  }
+  .dock-more .dock-hd b { font-size: calc(12px * var(--ui-fs-scale, 1)); }
+  .dock-more .dock-hd span { font-size: calc(9.5px * var(--ui-fs-scale, 1)); }
+  .dock-more .dock-sec {
+    gap: 4px;
+    padding: 5px;
+    border-radius: 7px;
+  }
+  .dock-more .dock-sec-t { font-size: calc(9.5px * var(--ui-fs-scale, 1)); }
+  .dock-more .dock-sec .ib-btn,
+  .dock-more .dock-sec .ib-btn.wz-open,
+  .dock-more .dock-sec .ib-btn.qm {
+    min-height: 34px;
+    padding: 3px 5px;
+    font-size: calc(10.5px * var(--ui-fs-scale, 1));
+  }
+  .cmd-menu {
+    width: min(300px, calc(100vw - 16px));
+    padding: 7px;
+    border-radius: 10px;
+  }
+  .cmd-hd { padding: 0 2px 5px; }
+  .cmd-hd b { font-size: calc(12px * var(--ui-fs-scale, 1)); }
+  .cmd-hd span { font-size: calc(9.5px * var(--ui-fs-scale, 1)); }
+  .cmd-item { min-height: 36px; padding: 4px 6px; border-radius: 7px; }
+  .cmd-ic { width: 24px; height: 24px; font-size: 13px; }
+  .cmd-tx b { font-size: calc(11.5px * var(--ui-fs-scale, 1)); }
+  .cmd-tx em { font-size: calc(9.5px * var(--ui-fs-scale, 1)); }
+  .composer-collapsed-bar { min-height: 40px; padding: 0 10px; }
 }

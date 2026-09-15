@@ -51,12 +51,16 @@ const sourceRef = ref(null)
 const inputCollapsed = ref(false)
 try { inputCollapsed.value = localStorage.getItem('xc_composer_collapsed') === '1' } catch (e) {}
 const effectiveInputCollapsed = computed(() => !!isNarrow.value && inputCollapsed.value)
+const quickbarOpen = ref(false)
+const effectiveQuickbarOpen = computed(() => !isNarrow.value || quickbarOpen.value)
 const draftPreview = computed(() => String(text.value || '').replace(/\s+/g, ' ').trim().slice(0, 28))
 function autoGrow() {
   const el = sourceRef.value
   if (!el) return
   el.style.height = 'auto'
-  el.style.height = Math.min(184, Math.max(58, el.scrollHeight)) + 'px'
+  const min = isNarrow.value ? 46 : 58
+  const max = isNarrow.value ? 132 : 184
+  el.style.height = Math.min(max, Math.max(min, el.scrollHeight)) + 'px'
 }
 function onComposerInput() {
   const s = String(text.value || '').replace(/^\s+/, '')
@@ -70,6 +74,7 @@ function openCommands() {
 function pickCommand(c) {
   if (!c) return
   commandOpen.value = false
+  quickbarOpen.value = false
   if (c.action === 'import') { openExam.value('import'); return }
   if (c.action === 'daily') { openExam.value('morning', { autoStart: true }); return }
   text.value = c.prompt || ''
@@ -171,15 +176,26 @@ onBeforeUnmount(() => {
             </button>
           </div>
           <div v-if="!effectiveInputCollapsed" id="chat-composer-main" class="composer-main">
-            <div class="composer-quickbar" aria-label="常用输入功能">
-              <span>常用</span>
-              <button v-for="c in COMMANDS.slice(0, 4)" :key="c.id" class="cq-btn" @click="pickCommand(c)">{{ c.ic }} {{ c.label }}</button>
-              <button class="cq-btn cq-web" :class="{ on: webSearchOn }" :disabled="webSearchBusy" :aria-pressed="webSearchOn" :title="webSearchOn ? '联网搜索已开启；点击关闭' : '开启后发送问题前会先搜索公开网页并附来源'" @click="toggleWebSearch()">🌐 {{ webSearchBusy ? '检索中…' : webSearchOn ? '联网开' : '联网搜索' }}</button>
+            <div class="composer-quickrow">
+              <button
+                v-if="isNarrow"
+                class="cq-toggle"
+                :class="{ on: quickbarOpen }"
+                :aria-expanded="quickbarOpen"
+                :title="quickbarOpen ? '收起常用功能' : '展开常用功能'"
+                aria-label="常用输入功能"
+                @click="quickbarOpen = !quickbarOpen"
+              >⚡</button>
+              <div v-if="effectiveQuickbarOpen" class="composer-quickbar" aria-label="常用输入功能">
+                <span v-if="!isNarrow">常用</span>
+                <button v-for="c in COMMANDS.slice(0, 4)" :key="c.id" class="cq-btn" @click="pickCommand(c)">{{ c.ic }} {{ c.label }}</button>
+                <button class="cq-btn cq-web" :class="{ on: webSearchOn }" :disabled="webSearchBusy" :aria-pressed="webSearchOn" :title="webSearchOn ? '联网搜索已开启；点击关闭' : '开启后发送问题前会先搜索公开网页并附来源'" @click="toggleWebSearch()">🌐 {{ webSearchBusy ? '检索中…' : webSearchOn ? '联网开' : '联网搜索' }}</button>
+              </div>
             </div>
             <textarea
               ref="sourceRef"
               v-model="text"
-              rows="2"
+              :rows="isNarrow ? 1 : 2"
               :placeholder="inputPh"
               :aria-label="inputPh"
               @input="onComposerInput"

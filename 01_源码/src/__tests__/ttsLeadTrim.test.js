@@ -10,7 +10,7 @@
 // 本文件锁定修复后的行为契约。
 import { describe, it, expect } from 'vitest'
 import { parseWavOnly, smoothWavBytes } from '../utils/tts/wav'
-import { detectLeadArtifact, trimLeadingAudioArtifacts, trimWavArtifacts, applyLeadTrim } from '../utils/ttsEngine'
+import { detectLeadArtifact, trimLeadingAudioArtifacts, trimWavArtifacts, trimMp3LeadArtifacts, applyLeadTrim, speechPauseMs } from '../utils/ttsEngine'
 import { store } from '../store'
 
 const SR = 16000
@@ -220,5 +220,37 @@ describe('trimLeadingAudioArtifacts 裁剪后必须是完整正文（不残留�
     store.cfg.ttsTrimLeadMs = 200
     const out = applyLeadTrim(makeCtx(SR), makeInput(SR, frames, data))
     expect(out.length).toBe(frames)
+  })
+})
+
+describe('HTMLAudio MP3 兜底裁剪与句间停顿', () => {
+  function makeMp3Frames(count) {
+    const frameLen = 417 // MPEG1 Layer III 128kbps 44.1kHz
+    const out = new Uint8Array(frameLen * count)
+    for (let f = 0; f < count; f++) {
+      const o = f * frameLen
+      out[o] = 0xff; out[o + 1] = 0xfb; out[o + 2] = 0x90; out[o + 3] = 0x00
+    }
+    return out.buffer
+  }
+
+  it('按 MPEG 帧时长裁掉固定前导，保留后续完整帧', () => {
+    const src = makeMp3Frames(20)
+    const out = trimMp3LeadArtifacts(src, 160)
+    expect(out.byteLength).toBe(13 * 417) // 每帧 26.12ms，裁掉 7 帧
+    expect(new Uint8Array(out)[0]).toBe(0xff)
+  })
+
+  it('裁剪值不超过现有帧时保持原音频，不破坏 MP3 结构', () => {
+    const src = makeMp3Frames(2)
+    expect(trimMp3LeadArtifacts(src, 0)).toBe(src)
+    expect(trimMp3LeadArtifacts(src, 30).byteLength).toBe(src.byteLength)
+  })
+
+  it('句间停顿收紧到连续讲解节奏，同时保留标点差异', () => {
+    expect(speechPauseMs('第一句。')).toBe(150)
+    expect(speechPauseMs('第一分句；')).toBe(105)
+    expect(speechPauseMs('短句，')).toBe(65)
+    expect(speechPauseMs('无标点')).toBe(40)
   })
 })

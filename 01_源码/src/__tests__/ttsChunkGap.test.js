@@ -2,25 +2,25 @@
 import { describe, it, expect } from 'vitest'
 import { speechPauseMs, chunkForTts, chunkText, cleanSpeechText } from '../utils/ttsEngine'
 
-describe('speechPauseMs 标点语义停顿（v3.8.332 重设）', () => {
-  it('句末标点给最长换气（260ms）', () => {
+describe('speechPauseMs 标点语义停顿（v3.8.357 收紧）', () => {
+  it('句末标点给最长换气（150ms）', () => {
     for (const p of ['。', '！', '？', '!', '?', '…']) {
-      expect(speechPauseMs('一句' + p)).toBe(260)
+      expect(speechPauseMs('一句' + p)).toBe(150)
     }
   })
-  it('分号次之（200ms）', () => {
-    expect(speechPauseMs('并列；')).toBe(200)
-    expect(speechPauseMs('a;')).toBe(200)
+  it('分号次之（105ms）', () => {
+    expect(speechPauseMs('并列；')).toBe(105)
+    expect(speechPauseMs('a;')).toBe(105)
   })
-  it('逗号/冒号/顿号（140ms）', () => {
+  it('逗号/冒号/顿号（65ms）', () => {
     for (const p of ['，', ',', '：', ':', '、']) {
-      expect(speechPauseMs('短停' + p)).toBe(140)
+      expect(speechPauseMs('短停' + p)).toBe(65)
     }
   })
-  it('无标点给最低呼吸感（90ms），且不返回 0（避免完全粘连）', () => {
-    expect(speechPauseMs('没有标点的一句话')).toBe(90)
-    expect(speechPauseMs('')).toBe(90)
-    expect(speechPauseMs(null)).toBe(90)
+  it('无标点给最低呼吸感（40ms），且不返回 0（避免完全粘连）', () => {
+    expect(speechPauseMs('没有标点的一句话')).toBe(40)
+    expect(speechPauseMs('')).toBe(40)
+    expect(speechPauseMs(null)).toBe(40)
   })
   it('停顿必须单调递减：句末 > 分号 > 逗号 > 无标点', () => {
     const a = speechPauseMs('。'), b = speechPauseMs('；'), c = speechPauseMs('，'), d = speechPauseMs('x')

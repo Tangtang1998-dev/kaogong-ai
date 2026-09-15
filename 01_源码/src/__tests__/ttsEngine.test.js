@@ -62,12 +62,12 @@ describe('cleanSpeechText 朗读文本清洗（去 AI 味前的正文净化）',
     expect(out).toContain('第二段也没有标点。')
   })
 
-  it('分块停顿时长随句末标点区分（v3.8.332 按标点语义重设）', () => {
-    expect(speechPauseMs('这是一整句。')).toBe(260)
-    expect(speechPauseMs('问一句？')).toBe(260)
-    expect(speechPauseMs('这是分号；')).toBe(200)
-    expect(speechPauseMs('这里只是小停顿，')).toBe(140)
-    expect(speechPauseMs('这段真的没有标点')).toBe(90)
+  it('分块停顿时长随句末标点区分（v3.8.357 收紧为连续讲解节奏）', () => {
+    expect(speechPauseMs('这是一整句。')).toBe(150)
+    expect(speechPauseMs('问一句？')).toBe(150)
+    expect(speechPauseMs('这是分号；')).toBe(105)
+    expect(speechPauseMs('这里只是小停顿，')).toBe(65)
+    expect(speechPauseMs('这段真的没有标点')).toBe(40)
     // 停顿必须形成明显的“呼吸梯度”：句末 > 分号 > 逗号 > 无标点
     expect(speechPauseMs('。')).toBeGreaterThan(speechPauseMs('；'))
     expect(speechPauseMs('；')).toBeGreaterThan(speechPauseMs('，'))

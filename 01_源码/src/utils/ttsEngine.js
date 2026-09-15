@@ -97,11 +97,15 @@ export function playing() {
 }
 // 播放二进制音频；mime 如 audio/wav / audio/mpeg；resolve(true)=正常播完
 export function playBytes(bytes, mime) {
+  return Promise.resolve(prepareHtmlAudioChunk(bytes, mime))
+    .then((p) => playBytesNow(p.bytes, p.mime))
+    .catch(() => playBytesNow(bytes, mime))
+}
+function playBytesNow(bytes, mime) {
   return new Promise((resolve) => {
     try {
       stopPlayback()
-      // 单段播放（试音/回退）也走统一裁剪：去掉 GLM 开头的提示音“嘟嘟”，保证所有入口判据一致
-      const data = /wav/i.test(mime || '') ? trimWavArtifacts(bytes) : bytes
+      const data = bytes
       const blob = new Blob([data], { type: mime || 'audio/mpeg' })
       const url = URL.createObjectURL(blob)
       const audio = _player.audio || (_player.audio = new Audio())
@@ -170,6 +174,7 @@ function primeAudioElement(audio) {
 // 且每段音频开头都有“嘟嘟 叮叮”纯音提示音。这里统一：①按块解析出真正的 data；②去掉开头纯音与静音；
 // ③去掉结尾静音；④淡入淡出；⑤重建为标准 WAV（丢弃元数据）。
 const _sp = { q: [], playing: false, audio: null, url: '', endCb: null, errCb: null, timer: null }
+_sp.token = 0
 export function spClean() {
   if (_sp.url) { try { URL.revokeObjectURL(_sp.url) } catch (e) {} _sp.url = '' }
   if (_sp.timer) { try { clearTimeout(_sp.timer) } catch (e) {} _sp.timer = null }
@@ -184,8 +189,24 @@ export function spNext() {
   if (_sp.playing || !_sp.q.length) return
   const it = _sp.q.shift()
   _sp.playing = true
+  const token = _sp.token
+  if (!it.ready || typeof it.ready.then !== 'function') {
+    const prepared = it.ready || it
+    startSpChunk(prepared.bytes || it.bytes, prepared.mime || it.mime, token)
+    return
+  }
+  Promise.resolve(it.ready || it).then((prepared) => {
+    if (token !== _sp.token) return
+    startSpChunk(prepared.bytes || it.bytes, prepared.mime || it.mime, token)
+  }).catch(() => {
+    if (token !== _sp.token) return
+    startSpChunk(it.bytes, it.mime, token)
+  })
+}
+function startSpChunk(bytes, mime, token) {
+  if (token !== _sp.token) return
   try {
-    const url = URL.createObjectURL(new Blob([it.bytes], { type: it.mime }))
+    const url = URL.createObjectURL(new Blob([bytes], { type: mime }))
     // 必须复用同一个已由用户手势解锁的 Audio 元素；每段 new Audio()
     // 在部分 Android WebView / iOS PWA 会被当成新元素拦截并直接报播放失败。
     const a = _sp.audio || (_sp.audio = new Audio())
@@ -197,6 +218,7 @@ export function spNext() {
     const settle = (ok) => {
       if (settled) return
       settled = true
+      if (token !== _sp.token) return
       if (_sp.timer) { try { clearTimeout(_sp.timer) } catch (e) {} _sp.timer = null }
       spClean(); _sp.playing = false
       if (!ok) {
@@ -221,8 +243,16 @@ export function spNext() {
     else spNext()
   }
 }
-export function spEnqueue(bytes, mime) { _sp.q.push({ bytes: /wav/i.test(mime) ? trimWavArtifacts(bytes) : bytes, mime }); spNext() }
+export function spEnqueue(bytes, mime) {
+  const type = mime || 'audio/mpeg'
+  const ready = /wav/i.test(type)
+    ? { bytes: trimWavArtifacts(bytes), mime: type }
+    : prepareHtmlAudioChunk(bytes, type)
+  _sp.q.push({ bytes, mime: type, ready })
+  spNext()
+}
 export function spStop() {
+  _sp.token++
   _sp.q = []
   const a = _sp.audio
   _sp.audio = null
@@ -354,6 +384,16 @@ export function applyLeadTrim(ctx, decoded) {
     const cfg = store.cfg || {}
     if (cfg.ttsTrimLead === false) return decoded
     const key = leadMemoKey()
+    const hardMs = Math.min(LEAD_MAX_MS, Math.max(0, Number(cfg.ttsTrimLeadMs) || 0))
+    const hard = hardMs > 0 ? Math.floor(decoded.sampleRate * hardMs / 1000) : 0
+    const memoCut = _leadMemo.key === key && _leadMemo.ms >= LEAD_MIN_MS
+      ? Math.floor(decoded.sampleRate * _leadMemo.ms / 1000)
+      : 0
+    // 第一块确认过提示音长度后，后续块直接确定性裁剪，避免重复扫描拖慢块间衔接。
+    if (memoCut > 0) {
+      const cut = Math.max(memoCut, hard)
+      if (keepEnough(decoded, cut)) return sliceFrom(ctx, decoded, cut)
+    }
     // ① 智能识别（唯一裁判断据：crest=peak/rms）
     const info = detectLeadArtifact(decoded)
     if (info.lead > 0 && info.confident) {
@@ -366,8 +406,6 @@ export function applyLeadTrim(ctx, decoded) {
       smart = Math.max(smart, Math.floor(decoded.sampleRate * _leadMemo.ms / 1000))
     }
     // ③ 手动兜底：强制裁掉开头 N 毫秒（双保险）
-    const hardMs = Math.min(LEAD_MAX_MS, Math.max(0, Number(cfg.ttsTrimLeadMs) || 0))
-    const hard = hardMs > 0 ? Math.floor(decoded.sampleRate * hardMs / 1000) : 0
     // 【v3.8.332 关键修正】硬裁与智能识别**取最大值**，不再「硬裁命中即 return」。
     // 否则智能识别本可裁 1300ms 时会被 200ms 的硬裁短路，导致嘟声复活。
     // 只有智能识别确认存在前导提示音时，才允许手动硬裁值参与取最大值；
@@ -586,13 +624,26 @@ export function trimWavArtifacts(bytes) {
     const buf = { numberOfChannels: 1, length: pcm.length, sampleRate: p.rate, duration: pcm.length / p.rate, getChannelData: () => pcm }
     const an = analyzeAudio(buf)
     if (an.peakAll < 0.02) return bytes
-    const { lead } = detectLeadArtifact(buf)
+    const key = leadMemoKey()
+    const hardMs = Math.min(LEAD_MAX_MS, Math.max(0, Number(store.cfg.ttsTrimLeadMs) || 0))
+    const hard = hardMs > 0 ? Math.floor(p.rate * hardMs / 1000) : 0
+    const memoCut = _leadMemo.key === key && _leadMemo.ms >= LEAD_MIN_MS
+      ? Math.floor(p.rate * _leadMemo.ms / 1000)
+      : 0
+    if (memoCut > 0) {
+      const cut = Math.max(memoCut, hard)
+      if (cut > 0 && (pcm.length - cut) > Math.floor(p.rate * 0.3)) return pcmToWav(pcm.subarray(cut), p.rate)
+    }
+    const info = detectLeadArtifact(buf)
+    const lead = info.lead
+    if (lead > 0 && info.confident) {
+      _leadMemo.key = key
+      _leadMemo.ms = lead / p.rate * 1000
+    }
     const tail = detectTailEnd(buf, an.floor)
     if (lead <= 0 && tail >= pcm.length) return bytes
     if (tail - lead < Math.floor(p.rate * 0.05)) return bytes
     // 手动兜底：与 applyLeadTrim 一致，硬裁与智能识别取最大值
-    const hardMs = Math.min(LEAD_MAX_MS, Math.max(0, Number(store.cfg.ttsTrimLeadMs) || 0))
-    const hard = hardMs > 0 ? Math.floor(p.rate * hardMs / 1000) : 0
     const cut = lead > 0 ? Math.max(lead, hard) : 0
     const safeCut = cut > 0 && (tail - cut) > Math.floor(p.rate * 0.3) ? cut : lead
     if (safeCut <= 0 && tail >= pcm.length) return bytes
@@ -600,6 +651,87 @@ export function trimWavArtifacts(bytes) {
   } catch (e) {
     return bytes
   }
+}
+// 压缩音频（MP3）的兜底裁头：移动端 Web Audio 解码不可用时，按 MPEG 帧时长跳过固定前导。
+// 只删完整帧，不破坏后面的 MP3 帧结构；可避免 `<audio>` 队列把引擎提示音原样播出来。
+export function trimMp3LeadArtifacts(bytes, leadMs = 160) {
+  try {
+    const u8 = bytes instanceof Uint8Array ? bytes : new Uint8Array(gapBytes(bytes))
+    if (u8.length < 16) return bytes
+    let start = 0
+    if (u8[0] === 0x49 && u8[1] === 0x44 && u8[2] === 0x33) {
+      const size = ((u8[6] & 0x7f) << 21) | ((u8[7] & 0x7f) << 14) | ((u8[8] & 0x7f) << 7) | (u8[9] & 0x7f)
+      start = Math.min(u8.length, 10 + size)
+    }
+    const target = Math.max(0, Number(leadMs) || 0) / 1000
+    let off = start
+    let elapsed = 0
+    let frames = 0
+    while (off + 4 <= u8.length && elapsed < target) {
+      const h = (u8[off] << 24) | (u8[off + 1] << 16) | (u8[off + 2] << 8) | u8[off + 3]
+      if (((h & 0xffe00000) >>> 0) !== 0xffe00000) break
+      const ver = (h >>> 19) & 3
+      const layer = (h >>> 17) & 3
+      const brIdx = (h >>> 12) & 15
+      const srIdx = (h >>> 10) & 3
+      const pad = (h >>> 9) & 1
+      if (ver === 1 || layer !== 1 || brIdx === 0 || brIdx === 15 || srIdx === 3) break
+      const brTable = ver === 3
+        ? [0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320]
+        : [0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160]
+      const srTable = ver === 3 ? [44100, 48000, 32000] : ver === 2 ? [22050, 24000, 16000] : [11025, 12000, 8000]
+      const bitrate = brTable[brIdx] * 1000
+      const sampleRate = srTable[srIdx]
+      const frameLen = Math.floor(((ver === 3 ? 144 : 72) * bitrate) / sampleRate) + pad
+      if (frameLen < 8 || off + frameLen > u8.length) break
+      elapsed += (ver === 3 ? 1152 : 576) / sampleRate
+      frames++
+      off += frameLen
+    }
+    if (!frames || off >= u8.length) return bytes
+    return u8.slice(off).buffer
+  } catch (e) {
+    return bytes
+  }
+}
+let _trimDecodeCtx = null
+function trimDecodeContext() {
+  if (_trimDecodeCtx) return _trimDecodeCtx
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext
+    if (!AC) return null
+    _trimDecodeCtx = new AC()
+  } catch (e) {
+    _trimDecodeCtx = null
+  }
+  return _trimDecodeCtx
+}
+async function decodeCompressedForTrim(bytes) {
+  const ctx = trimDecodeContext()
+  if (!ctx) return null
+  try {
+    const decoded = await ctx.decodeAudioData(gapBytes(bytes).slice(0))
+    const trimmed = applyLeadTrim(ctx, decoded)
+    if (!trimmed || trimmed === decoded) return null
+    const chans = []
+    for (let c = 0; c < trimmed.numberOfChannels; c++) chans.push(trimmed.getChannelData(c))
+    return { bytes: audioBufferToWavBytes(chans, trimmed.sampleRate), mime: 'audio/wav' }
+  } catch (e) {
+    return null
+  }
+}
+// HTMLAudio 回退链路统一预处理：WAV 走 PCM 判据，MP3 优先解码后走同一判据；
+// 解码不可用时用 MPEG 帧级固定裁头兜底。这样读题、出题、试音和正式对话不再各走一套。
+async function prepareHtmlAudioChunk(bytes, mime) {
+  const type = String(mime || 'audio/mpeg')
+  if (!store.cfg || store.cfg.ttsTrimLead === false) return { bytes, mime: type }
+  if (/wav/i.test(type)) return { bytes: trimWavArtifacts(bytes), mime: type }
+  if (!/mpeg|mp3/i.test(type)) return { bytes, mime: type }
+  const decoded = isFileProtocol() ? null : await decodeCompressedForTrim(bytes)
+  if (decoded) return decoded
+  const configured = Math.max(0, Number(store.cfg.ttsTrimLeadMs) || 0)
+  const leadMs = Math.min(600, Math.max(100, configured || 160))
+  return { bytes: trimMp3LeadArtifacts(bytes, leadMs), mime: type }
 }
 // 调度（串行）：按 AudioContext 时间轴首尾精确衔接，像真人说话一样无缝隙
 function gapStart(audioBuf, meta) {

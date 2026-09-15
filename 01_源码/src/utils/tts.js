@@ -1,5 +1,6 @@
 import { store } from '../store'
 import { showToast } from './toast'
+import { licenseState } from './license'
 import {
   TTS_ENGINES,
   GLM_PRESET_VOICES,
@@ -134,6 +135,11 @@ function fallbackToast(info) {
 // 按 store.cfg.ttsMode 分发：glm(默认·智谱超拟人) / openai / edge / sys
 export function speak(text, opts) {
   opts = opts || {}
+  if (licenseState.ready && !licenseState.active) {
+    showToast('朗读功能需要激活正式套餐', 'info')
+    if (opts.onError) opts.onError('license-required')
+    return Promise.resolve({ ok: false, msg: 'license-required' })
+  }
   return speakPro(text, {
     voice: opts.voice,
     // 角色专属声线：允许单次朗读临时指定引擎/模型/自定义音色，不改动全局语音设置

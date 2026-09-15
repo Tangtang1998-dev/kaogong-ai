@@ -2,6 +2,7 @@
 // 底层 API 调用：双模型路由、鉴权头、流式/单次对话、AI 整理
 import { store } from '../store'
 import { recordCost, beginCost, getBudget, todaySpend } from '../utils/costTrack'
+import { requireLicense } from '../utils/license'
 
 // 花费标注：调用方可在发起 AI 请求前 setCostCtx('pet'|'exam'|...) 标注功能归属（下一条记录消费后自动清空）
 let costCtx = ''
@@ -99,6 +100,8 @@ export function activeCfg(hasImg) {
 }
 
 export async function chatStream(messages, c, onDelta, signal, timeoutMs = 120000) {
+  const lic = requireLicense(1)
+  if (!lic.ok) { const e = new Error(lic.msg || '请先激活正式套餐'); e.name = 'LicenseError'; throw e }
   return withGlobalThrottle(() => chatStreamInner(messages, c, onDelta, signal, timeoutMs))
 }
 async function chatStreamInner(messages, c, onDelta, signal, timeoutMs = 120000) {
@@ -231,6 +234,8 @@ async function chatStreamInner(messages, c, onDelta, signal, timeoutMs = 120000)
 }
 
 export async function chatOnce(c, messages, maxTokens = 2000, timeoutMs = 120000, signal) {
+  const lic = requireLicense(1)
+  if (!lic.ok) { const e = new Error(lic.msg || '请先激活正式套餐'); e.name = 'LicenseError'; throw e }
   assertBudget()
   const ds = dsRequest(c)
   // deepseek-flash（V4.1-Flash）默认走思考模式，必须按推理模型处理（去掉 temperature、给足输出上限）

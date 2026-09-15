@@ -18,6 +18,7 @@ import ExamBar from './components/ExamBar.vue'
 import ExamManager from './components/ExamManager.vue'
 import PetAvatar from './components/PetAvatar.vue'
 import ReviewHub from './components/ReviewHub.vue' // R 今日复习中枢（全局）
+import LicenseGate from './components/LicenseGate.vue'
 import { doExport, exportWrongTxt, exportDataMd, exportWrongMd, parseMarkdownNotes } from './utils/export'
 import { showToast } from './utils/toast'
 import { emit as evEmit } from './utils/events'
@@ -31,6 +32,7 @@ import { runGitHubSync, runGitHubUpload, runGitHubDownload } from './utils/githu
 import { runGiteeSync, runGiteeUpload, runGiteeDownload } from './utils/giteeSync'
 import { genLogSize, exportGenLog, clearGenLog } from './utils/quizLog'
 import { authState, authInit, authHasUsers, authRegister, authLogin, authLogout, authChangePass, authDeleteUser, authSetEnabled, authResetLocal } from './utils/auth'
+import { licenseState, licenseInit } from './utils/license'
 import { pickDataFolder, saveAllDataToFolder, getFolderName } from './utils/localData'
 import { downloadBackup, shareBackup, restoreAll } from './utils/dataBackup'
 import { detectNative, nativeWriteFile, nativeBackupPath, startNativeAutoBackup, stopNativeAutoBackup } from './utils/nativeSave'
@@ -527,6 +529,7 @@ function costResetPrices() {
 }
 // ===== 本地账号（登录门）=====
 const authLoading = ref(true)
+const licenseShow = ref(false)
 const authMode = ref('login')
 const authU = ref('')
 const authP = ref('')
@@ -2463,6 +2466,7 @@ installPlusBackBehavior({ onFirstBack: () => { try { nativeToast('再按一次�
 if (isNativeHost()) { try { installNativeBackBehavior() } catch (e) {} } // 自建宿主：返回键走同一套 onHardwareBack 链
 onMounted(() => {
   authGateInit()
+  licenseInit()
   clampFloatPos()
   refreshSyncUi()
   if (wdAuto.value || ghAuto.value || geAuto.value) {
@@ -2530,6 +2534,7 @@ onUnmounted(() => {
       <div class="auth-foot">💬 六大板块 · 名师方法论 · AI 出题/答疑/朗读 · 网页/iPad + 独立手机端</div>
     </div>
   </div>
+  <LicenseGate v-if="licenseState.ready" :manual="licenseShow" @close="licenseShow = false" />
   <!-- 自定义确认弹窗（账号重置/删除等，替代原生 confirm，PWA/webview 更稳） -->
   <div v-if="authConfirm" class="auth-confirm-ov" @click.self="authConfirmNo()">
     <div class="auth-confirm-box">
@@ -2617,6 +2622,7 @@ onUnmounted(() => {
         <button class="cost-pill" :class="{ warn: costToday > 0, live: costLive.active }" :title="costLive.active ? '🔴 正在调用 AI（' + (COST_FEATURES[costLive.feature] || costLive.feature) + ' · ' + (costLive.model || '') + '），完成自动记账' : '💰 AI 用量与花费（实时追踪）：点开查看明细、计价表、清空记录'" @click="costShow = true">
           💰 {{ fmtCost(costToday) }}<span v-if="costLive.active" class="cost-pill-live"></span>
         </button>
+        <button class="btn" style="padding: 4px 12px; font-size: calc(13px * var(--ui-fs-scale, 1))" :class="{ on: licenseState.mode === 'paid' }" title="套餐、设备码、到期时间和激活码" @click="licenseShow = true">💎 会员</button>
         <button class="btn" :class="{ on: setShow && setGroup === 'data' }" style="padding: 4px 12px; font-size: calc(13px * var(--ui-fs-scale, 1))" title="数据同步与保存：本地基础、Gitee、GitHub、WebDAV、导出导入" @click="openDataSync()">
           💾 数据同步
         </button>
@@ -2641,6 +2647,7 @@ onUnmounted(() => {
           </div>
           <div class="top-mm-row"><span class="status-pill"><span class="dot" :class="stDot"></span><span>{{ stStat }}</span></span></div>
           <button class="top-mm-it" @click="moreGo(() => costShow = true)">💰 用量与花费 {{ fmtCost(costToday) }}</button>
+          <button class="top-mm-it" @click="moreGo(() => { licenseShow = true })">💎 会员与激活</button>
           <button class="top-mm-it" @click="moreGo(() => openDataSync())">💾 数据同步与保存</button>
           <button class="top-mm-it" @click="moreGo(() => openExp('chat'))">📤 导出</button>
           <button class="top-mm-it" @click="moreGo(() => openSet())">⚙️ 设置</button>

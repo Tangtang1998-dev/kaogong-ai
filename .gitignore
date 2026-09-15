@@ -294,3 +294,8 @@ node_modules/
 /行测用户数据/
 /.idea/
 /.reasonix/
+
+# 离线授权私钥与本机烟测截图：只保留在开发者本机，不入公开仓库
+/10_授权工具/private-key.json
+/10_授权工具/smoke-*.png
+/10_授权工具/__pycache__/

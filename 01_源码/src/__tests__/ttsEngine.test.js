@@ -272,9 +272,13 @@ describe('真人引擎失败回退（回归：不得只弹网络错误而无声�
   afterEach(() => { vi.unstubAllGlobals() })
 
   it('OpenAI 兼容网络失败时自动切换百炼真人音色，不回退系统语音', async () => {
-    vi.stubGlobal('fetch', vi.fn(async (url) => {
+    let dashBody = null
+    vi.stubGlobal('fetch', vi.fn(async (url, init) => {
       const u = String(url || '')
-      if (u.includes('dashscope.aliyuncs.com')) return { ok: true, json: async () => ({ output: { audio: { url: 'https://audio.test/dash.mp3' } } }) }
+      if (u.includes('dashscope.aliyuncs.com')) {
+        dashBody = JSON.parse(init.body)
+        return { ok: true, json: async () => ({ output: { audio: { url: 'https://audio.test/dash.mp3' } } }) }
+      }
       if (u === 'https://audio.test/dash.mp3') return { ok: true, arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer }
       throw new TypeError('Failed to fetch')
     }))
@@ -293,11 +297,18 @@ describe('真人引擎失败回退（回归：不得只弹网络错误而无声�
     })
     const onFallback = vi.fn()
     const onError = vi.fn()
-    const r = await speakPro('这是一段用于验证回退的网络错误场景文本。', { engine: 'openai', rate: 1, pitch: 1, onFallback, onError })
+    const voiceMap = {
+      openai: { voice: 'pet-openai-voice', model: 'FunAudioLLM/CosyVoice2-0.5B' },
+      dash: { voice: 'PetDashVoice', model: 'qwen3-tts-instruct-flash' },
+      edge: { voice: 'zh-CN-YunxiNeural', model: 'edge-neural' }
+    }
+    const r = await speakPro('这是一段用于验证回退的网络错误场景文本。', { engine: 'openai', voice: 'pet-openai-voice', rate: 1, pitch: 1, voiceMap, petId: 'lixingyun', petName: '李星云', onFallback, onError })
     expect(r.ok).toBe(true)
     expect(r.engine).toBe('dash')
+    expect(r.petId).toBe('lixingyun')
+    expect(dashBody.input.voice).toBe('PetDashVoice')
     expect(onFallback).toHaveBeenCalled()
-    expect(onFallback.mock.calls[0][0]).toMatchObject({ from: 'openai', to: 'dash' })
+    expect(onFallback.mock.calls[0][0]).toMatchObject({ from: 'openai', to: 'dash', voice: 'PetDashVoice', petId: 'lixingyun', petName: '李星云' })
     expect(onError).not.toHaveBeenCalled()
   })
 })

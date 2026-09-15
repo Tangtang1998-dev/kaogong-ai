@@ -233,9 +233,9 @@ export function load() {
       const v = sv[k]
       if (v && (DELETED_VOICES.has(v.voice) || DELETED_VOICES.has(v.name))) delete sv[k]
     }
-    const BUILTIN_NAMES = new Set(['薛神', '章若楠', '李星云', '姬如雪'])
+    const BUILTIN_NAMES = new Set(['薛神', '章若楠', '李星云', '姬如雪', '花生十三', '小P', '小黑', '文姐', '巾神'])
     store.cfg.customSkins = (store.cfg.customSkins || []).filter((s) => !s || !BUILTIN_NAMES.has(s.name || ''))
-    const keepSkins = new Set(['xueshen', 'zhangruonan', 'lixingyun', 'jiruxue', 'custom'])
+    const keepSkins = new Set(['xueshen', 'zhangruonan', 'lixingyun', 'jiruxue', 'huasheng13', 'xiaop', 'xiaohei', 'wenjie', 'jinshen', 'custom'])
     ;(store.cfg.customSkins || []).forEach((s) => { if (s && s.id) keepSkins.add(s.id) })
     for (const k of Object.keys(sv)) if (!keepSkins.has(k)) delete sv[k]
     store.cfg.skinVoices = sv

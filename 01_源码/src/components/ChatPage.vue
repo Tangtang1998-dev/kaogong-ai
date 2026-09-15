@@ -2133,7 +2133,18 @@ function speakMsgTxt(txt, onEnd, trackMessage = false, question = '', cacheOnly 
 function speechOptionsForFallback(base, info) {
   const o = info && typeof info === 'object' ? info : {}
   const to = String(o.to || o.engine || '').trim()
-  if (to && to !== 'sys') return Object.assign({}, base || {}, { engine: to, voice: o.voice, model: o.model, voiceCustom: o.voiceCustom || '' })
+  if (to && to !== 'sys') {
+    return Object.assign({}, base || {}, {
+      engine: to,
+      voice: o.voice,
+      model: o.model,
+      voiceCustom: o.voiceCustom || '',
+      petId: o.petId || (base && base.petId) || '',
+      petName: o.petName || (base && base.petName) || '',
+      voiceName: o.voiceName || (base && base.voiceName) || '',
+      voiceMap: o.voiceMap || (base && base.voiceMap) || null
+    })
+  }
   return Object.assign({}, base || {}, { engine: 'sys' })
 }
 function startMessageSpeech(m, idx, txt, question) {

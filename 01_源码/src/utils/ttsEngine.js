@@ -1736,7 +1736,24 @@ function humanEngineAvailable(id) {
   if (id === 'edge') return true
   return false
 }
-function humanCandidateOptions(id) {
+function humanCandidateOptions(id, opts = {}) {
+  // 萌宠朗读时，每个备用引擎都必须继续使用同一个角色的声线映射。
+  // 只有没有角色映射的普通朗读，才允许回退到全局设置音色。
+  const mapped = opts.voiceMap && opts.voiceMap[id]
+  if (mapped && mapped.voice) {
+    return {
+      voice: mapped.voice,
+      model: mapped.model || '',
+      voiceCustom: mapped.voiceCustom || '',
+      voiceName: mapped.voiceName || mapped.name || '',
+      petId: opts.petId || '',
+      petName: opts.petName || ''
+    }
+  }
+  const requested = String(opts.engine || '')
+  if (id === requested && opts.voice) {
+    return { voice: opts.voice, model: opts.model || '', voiceCustom: opts.voiceCustom || '', voiceName: opts.voiceName || '', petId: opts.petId || '', petName: opts.petName || '' }
+  }
   const c = store.cfg || {}
   if (id === 'glm') return { voice: c.ttsGm && c.ttsGm.voice, model: c.ttsGm && (c.ttsGm.model || 'glm-tts'), voiceCustom: '' }
   if (id === 'dash') return { voice: c.ttsDash && c.ttsDash.voice, model: c.ttsDash && c.ttsDash.model, voiceCustom: (c.ttsDash && c.ttsDash.voiceCustom) || '' }
@@ -1770,9 +1787,7 @@ export async function speakPro(text, opts = {}) {
   for (let round = 0; round < rounds; round++) {
     for (let i = 0; i < chain.length; i++) {
       const id = chain[i]
-      const info = id === mode
-        ? { voice: opts.voice, model: opts.model, voiceCustom: opts.voiceCustom }
-        : humanCandidateOptions(id)
+      const info = humanCandidateOptions(id, opts)
       const attempt = Object.assign({}, opts, info, {
         engine: id,
         __noHumanFallback: true,
@@ -1782,14 +1797,14 @@ export async function speakPro(text, opts = {}) {
         onFallback: null,
         onEnd: (...args) => {
           if (id !== mode && opts.onFallback) {
-            try { opts.onFallback({ from: mode, to: id, reason: lastMsg || '', voice: info.voice, model: info.model, voiceCustom: info.voiceCustom }) } catch (e) {}
+            try { opts.onFallback({ from: mode, to: id, reason: lastMsg || '', voice: info.voice, model: info.model, voiceCustom: info.voiceCustom, voiceName: info.voiceName || '', petId: info.petId || opts.petId || '', petName: info.petName || opts.petName || '', voiceMap: opts.voiceMap || null }) } catch (e) {}
           }
           if (opts.onEnd) opts.onEnd(...args)
         }
       })
       const r = await speakProAttempt(text, attempt)
       if (r && r.ok) {
-        return Object.assign({}, r, { engine: id })
+        return Object.assign({}, r, { engine: id, voice: info.voice, model: info.model, voiceCustom: info.voiceCustom || '', voiceName: info.voiceName || opts.voiceName || '', petId: info.petId || opts.petId || '', petName: info.petName || opts.petName || '' })
       }
       if (r && r.msg) lastMsg = r.msg
     }

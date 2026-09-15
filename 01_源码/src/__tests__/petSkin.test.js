@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { store } from '../store'
-import { PET_SKINS, petAllSkins, petSkin, applyPetSkin, pet, petImg, petImgOf, setPetImg, clearPetImg, petSkinVoiceOf, petVoiceBindingOf, petVoiceBindings, petBindCloneVoice, petBindBuiltinVoice, petUnbindBuiltinVoice, petUnbindCloneVoice, petBoundVoices, petGlobalVoice, savePetGlobalVoice, petCustomData, petIsLocked, petAddCustomSkin, petRemoveCustomSkin, petSkinSampleOf, petSpeakOpts } from '../utils/pet'
+import { PET_SKINS, petAllSkins, petSkin, applyPetSkin, pet, petImg, petImgOf, setPetImg, clearPetImg, petSkinVoiceOf, petVoiceMapOf, petVoiceBindingOf, petVoiceBindings, petBindCloneVoice, petBindBuiltinVoice, petUnbindBuiltinVoice, petUnbindCloneVoice, petBoundVoices, petGlobalVoice, savePetGlobalVoice, petCustomData, petIsLocked, petAddCustomSkin, petRemoveCustomSkin, petSkinSampleOf, petSpeakOpts } from '../utils/pet'
 
 const petSkinTestMem = new Map()
 if (!globalThis.localStorage) {
@@ -630,6 +630,28 @@ describe('萌宠声线：朗读实时解析 + 角色列表去重', () => {
     store.cfg.customSkins = []
   })
 
+  it('九个内置萌宠都固定自己的多引擎声线身份，不引用其他角色配置', () => {
+    const expected = {
+      xueshen: { glm: '9e3957f5-74b0-5efa-b1fa-6894fdb7e45f', dash: 'Neil', openai: 'onyx', edge: 'zh-CN-YunjianNeural' },
+      zhangruonan: { glm: '83eac18d-fd6a-531b-9a71-67b0e6d340ee', dash: 'Serena', openai: 'nova', edge: 'zh-CN-XiaoxiaoNeural' },
+      lixingyun: { glm: 'a6d7ba90-7cd6-5ef6-9f37-d259112f8be1', dash: 'Moon', openai: 'echo', edge: 'zh-CN-YunxiNeural' },
+      jiruxue: { glm: '18a24e59-6e8c-57bd-aeb8-6584c7a7ada2', dash: 'Chelsie', openai: 'shimmer', edge: 'zh-CN-XiaoyiNeural' },
+      huasheng13: { glm: 'douxin', dash: 'Ethan', openai: 'fable', edge: 'zh-CN-YunjianNeural' },
+      xiaop: { glm: 'xiaochen', dash: 'Moon', openai: 'alloy', edge: 'zh-CN-YunxiNeural' },
+      xiaohei: { glm: 'streamer_male', dash: 'Kai', openai: 'echo', edge: 'zh-CN-YunyangNeural' },
+      wenjie: { glm: 'tongtong', dash: 'Serena', openai: 'nova', edge: 'zh-CN-XiaoyiNeural' },
+      jinshen: { glm: 'doushen_teacher_2', dash: 'Elias', openai: 'shimmer', edge: 'zh-CN-XiaomoNeural' }
+    }
+    for (const [id, voices] of Object.entries(expected)) {
+      const map = petVoiceMapOf(id)
+      const skin = PET_SKINS.find((s) => s.id === id)
+      for (const engine of ['glm', 'dash', 'openai', 'edge']) {
+        expect(map[engine].voice).toBe(voices[engine])
+        expect(map[engine].voiceName).toContain(skin.char)
+      }
+    }
+  })
+
   it('绑定已有克隆声线后，朗读实时使用该声线（不重新克隆、不花钱）', () => {
     store.cfg.ttsGm = { key: 'k', url: 'https://open.bigmodel.cn/api/paas/v4/audio/speech', model: 'glm-tts', voice: 'tongtong' }
     store.cfg.fig = { key: '', url: '' }
@@ -642,11 +664,15 @@ describe('萌宠声线：朗读实时解析 + 角色列表去重', () => {
     expect(petSpeakOpts().voice).not.toBe('clone-abc')
   })
 
-  it('目标引擎没配 Key 时交回全局音色（不硬切引擎，避免切角色后朗读直接失败）', () => {
+  it('目标引擎没配 Key 时仍保留角色身份，并能用同一角色的 Edge 备用声线播放', () => {
     store.cfg.ttsGm = { key: '', url: 'https://open.bigmodel.cn/api/paas/v4/audio/speech', model: 'glm-tts', voice: 'tongtong' }
     store.cfg.fig = { key: '', url: '' }
     applyPetSkin('huasheng13')
     petBindBuiltinVoice('huasheng13', { engine: 'glm', voice: 'clone-abc', name: 'x' })
-    expect(petSpeakOpts()).toEqual({})
+    const opts = petSpeakOpts()
+    expect(opts.petId).toBe('huasheng13')
+    expect(opts.voiceMap.edge.voice).toBe('zh-CN-YunjianNeural')
+    expect(opts.voiceMap.glm.voice).toBe('clone-abc')
+    expect(opts.engine).toBe('glm')
   })
 })

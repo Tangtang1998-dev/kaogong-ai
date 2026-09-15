@@ -135,42 +135,50 @@ const SKIN_DASH_VOICE = {
   jiruxue: 'Chelsie', // 姬如雪 → 二次元虚拟女友
   custom: 'Cherry' // 自定义人物 → 阳光亲切小姐姐
 }
-// 新增内置公考角色：形象/人设/参考原声随包内置；实时朗读使用对应引擎的官方声线映射。
+// 九位内置角色各自固定一条声线身份。即使首选引擎临时失败，也只切换到该角色自己的备用真人声线，
+// 不再使用全局音色或另一个角色的音色。这样名字、预览原声和实际朗读始终是同一个萌宠。
+const PET_ENGINE_MODELS = {
+  glm: 'glm-tts',
+  dash: 'qwen3-tts-instruct-flash',
+  openai: 'FunAudioLLM/CosyVoice2-0.5B',
+  edge: 'edge-neural'
+}
+const PET_VOICE_ENGINE_ORDER = ['glm', 'dash', 'openai', 'edge']
 const SKIN_PRESET_VOICES = {
   xueshen: {
-    name: '薛神内置声线',
+    name: '薛神原声', voiceName: '薛神 · 判断推理男声', cloned: { glm: true },
     voices: { glm: '9e3957f5-74b0-5efa-b1fa-6894fdb7e45f', edge: 'zh-CN-YunjianNeural', dash: 'Neil', openai: 'onyx' }
   },
   zhangruonan: {
-    name: '章若楠内置声线',
+    name: '章若楠原声', voiceName: '章若楠 · 温柔甜妹声线', cloned: { glm: true },
     voices: { glm: '83eac18d-fd6a-531b-9a71-67b0e6d340ee', edge: 'zh-CN-XiaoxiaoNeural', dash: 'Serena', openai: 'nova' }
   },
   lixingyun: {
-    name: '李星云内置声线',
+    name: '李星云原声', voiceName: '李星云 · 热血侠客声线', cloned: { glm: true },
     voices: { glm: 'a6d7ba90-7cd6-5ef6-9f37-d259112f8be1', edge: 'zh-CN-YunxiNeural', dash: 'Moon', openai: 'echo' }
   },
   jiruxue: {
-    name: '姬如雪内置声线',
+    name: '姬如雪原声', voiceName: '姬如雪 · 清冷雪女声线', cloned: { glm: true },
     voices: { glm: '18a24e59-6e8c-57bd-aeb8-6584c7a7ada2', edge: 'zh-CN-XiaoyiNeural', dash: 'Chelsie', openai: 'shimmer' }
   },
   huasheng13: {
-    name: '花生十三内置声线', sample: './pet-voices/huasheng13.mp3',
-    voices: { glm: 'douxin', edge: 'zh-CN-YunjianNeural', dash: 'Neil', openai: 'onyx' }
+    name: '花生十三专属声线', voiceName: '花生十三 · 逻辑言语讲师声线', sample: './pet-voices/huasheng13.mp3',
+    voices: { glm: 'douxin', edge: 'zh-CN-YunjianNeural', dash: 'Ethan', openai: 'fable' }
   },
   xiaop: {
-    name: '小P内置声线', sample: './pet-voices/xiaop.mp3',
-    voices: { glm: 'xiaochen', edge: 'zh-CN-YunxiNeural', dash: 'Ethan', openai: 'echo' }
+    name: '小P专属声线', voiceName: '小P · 资料数量讲师声线', sample: './pet-voices/xiaop.mp3',
+    voices: { glm: 'xiaochen', edge: 'zh-CN-YunxiNeural', dash: 'Moon', openai: 'alloy' }
   },
   xiaohei: {
-    name: '小黑内置声线', sample: './pet-voices/xiaohei.mp3',
-    voices: { glm: 'streamer_male', edge: 'zh-CN-YunyangNeural', dash: 'Kai', openai: 'alloy' }
+    name: '小黑专属声线', voiceName: '小黑 · 政治常识讲师声线', sample: './pet-voices/xiaohei.mp3',
+    voices: { glm: 'streamer_male', edge: 'zh-CN-YunyangNeural', dash: 'Kai', openai: 'echo' }
   },
   wenjie: {
-    name: '文姐内置声线', sample: './pet-voices/wenjie.mp3',
-    voices: { glm: 'tongtong', edge: 'zh-CN-XiaoyiNeural', dash: 'Seren', openai: 'nova' }
+    name: '文姐专属声线', voiceName: '文姐 · 实战复盘博主声线', sample: './pet-voices/wenjie.mp3',
+    voices: { glm: 'tongtong', edge: 'zh-CN-XiaoyiNeural', dash: 'Serena', openai: 'nova' }
   },
   jinshen: {
-    name: '巾神内置声线', sample: './pet-voices/jinshen.mp3',
+    name: '巾神专属声线', voiceName: '巾神 · 言语资料实战声线', sample: './pet-voices/jinshen.mp3',
     voices: { glm: 'doushen_teacher_2', edge: 'zh-CN-XiaomoNeural', dash: 'Elias', openai: 'shimmer' }
   }
 }
@@ -212,34 +220,78 @@ function setPetVoiceBinding(skinId, bind) {
   return petVoiceBindings[skinId] || null
 }
 // 每个角色可绑定「大模型克隆声线」：store.cfg.skinVoices[skinId] = { engine:'glm'|'openai'|'dash', voice, name, model?, voiceCustom? }
-// 绑定后一键切换角色即用对应声线；未绑定则保持全局音色（与「语音」设置完全一致）
+// 内置角色始终按自己的固定声线身份朗读；绑定只覆盖该角色指定引擎，不会污染其他角色。
+export function petVoiceMapOf(skinId) {
+  const s = petAllSkins.value.find((x) => x.id === skinId)
+  const preset = s && SKIN_PRESET_VOICES[s.id]
+  const bv = petVoiceBindingOf(skinId)
+  const map = {}
+  if (!preset) {
+    if (bv && bv.voice && bv.engine) {
+      map[bv.engine] = {
+        voice: bv.voice,
+        model: bv.model || PET_ENGINE_MODELS[bv.engine] || '',
+        voiceCustom: bv.voiceCustom || '',
+        name: bv.name || '',
+        voiceName: bv.name || petSkin.value.name || '',
+        cloned: true
+      }
+    }
+    return map
+  }
+  for (const eng of PET_VOICE_ENGINE_ORDER) {
+    const presetVoice = preset.voices[eng]
+    if (!presetVoice) continue
+    const bound = !!(bv && bv.engine === eng && bv.voice)
+    map[eng] = {
+      voice: bound ? bv.voice : presetVoice,
+      model: bound ? (bv.model || PET_ENGINE_MODELS[eng] || '') : (PET_ENGINE_MODELS[eng] || ''),
+      voiceCustom: bound ? (bv.voiceCustom || '') : '',
+      name: bound ? (bv.name || preset.name) : preset.name,
+      voiceName: preset.voiceName || preset.name,
+      cloned: !!(bound || (preset.cloned && preset.cloned[eng]))
+    }
+  }
+  return map
+}
 export function petSkinVoiceOf(skinId, engine) {
   const s = petAllSkins.value.find((x) => x.id === skinId)
-  const eng = engine || store.cfg.ttsMode || 'glm'
+  const requested = engine || store.cfg.ttsMode || 'glm'
   const bv = petVoiceBindingOf(skinId)
-  if (bv && bv.voice) {
-    // 已绑定的声线优先（含 dash 自定义/预设音色的绑定），并附 voiceCustom（百炼自然语言音色）
-    const out = { engine: bv.engine, voice: bv.voice, name: bv.name || '', model: bv.model || '', cloned: true }
+  if (bv && bv.voice && (!engine || bv.engine === engine)) {
+    const out = { engine: bv.engine, voice: bv.voice, name: bv.name || '', model: bv.model || '', cloned: true, petId: skinId, petName: (s && (s.char || s.name)) || skinId }
     if (bv.engine === 'dash' && bv.voiceCustom) out.voiceCustom = bv.voiceCustom
     return out
   }
-  // 皮肤自带的大模型克隆声线（如薛神）优先按克隆声线处理；未配好对应引擎时，退回下方免费 Edge 兜底，
-  // 让新用户不填 Key 也能听到每个角色的专属声线，而不是退回全局系统音色。
-  if (s && s.voice && s.voice.clonedVoice && presetEngineReady(s.voice.engine || 'glm')) {
-    return { engine: s.voice.engine || 'glm', voice: s.voice.voice, name: s.voice.name || '', model: s.voice.model || '', cloned: true }
-  }
-  // 新增内置公考角色：按当前可用引擎自动选声线；没有付费 Key 时优先使用免费 Edge。
   const preset = s && SKIN_PRESET_VOICES[s.id]
   if (preset) {
-    const chosen = (preset.voices[eng] && presetEngineReady(eng)) ? eng : 'edge'
-    return { engine: chosen, voice: preset.voices[chosen] || preset.voices.edge, name: preset.name, model: '', cloned: false, preset: true, sample: preset.sample }
+    const map = petVoiceMapOf(s.id)
+    const chosen = (engine && map[engine]) ? engine : (PET_VOICE_ENGINE_ORDER.find((id) => map[id] && presetEngineReady(id)) || 'edge')
+    const v = map[chosen] || map.edge || { voice: 'zh-CN-XiaoxiaoNeural', model: PET_ENGINE_MODELS.edge, voiceCustom: '', name: preset.name, voiceName: preset.voiceName }
+    return {
+      engine: chosen,
+      voice: v.voice,
+      model: v.model,
+      voiceCustom: v.voiceCustom || '',
+      name: v.name || preset.name,
+      voiceName: v.voiceName || preset.voiceName || preset.name,
+      cloned: !!v.cloned,
+      preset: true,
+      sample: preset.sample,
+      petId: s.id,
+      petName: s.char || preset.voiceName || preset.name
+    }
+  }
+  // 皮肤自带的大模型克隆声线（兼容旧自定义皮肤数据）。
+  if (s && s.voice && s.voice.clonedVoice && presetEngineReady(s.voice.engine || 'glm')) {
+    return { engine: s.voice.engine || 'glm', voice: s.voice.voice, name: s.voice.name || '', model: s.voice.model || '', cloned: true, petId: skinId, petName: (s.char || s.name) || skinId }
   }
   // 百炼引擎下，未绑定则回退到该萌宠对应的官方音色（实现"萌宠对应"）
-  if (eng === 'dash') {
+  if (requested === 'dash') {
     const dv = (s && SKIN_DASH_VOICE[s.id]) || 'Cherry'
-    return { engine: 'dash', voice: dv, name: '', model: '', cloned: false }
+    return { engine: 'dash', voice: dv, name: '', model: PET_ENGINE_MODELS.dash, cloned: false, petId: skinId, petName: (s && (s.char || s.name)) || skinId }
   }
-  return (s && s.voice) ? { ...s.voice, name: '', model: '', cloned: false } : { engine: 'glm', voice: 'tongtong', name: '', model: '', cloned: false }
+  return (s && s.voice) ? { ...s.voice, name: '', model: '', cloned: false, petId: skinId, petName: (s.char || s.name) || skinId } : { engine: 'glm', voice: 'tongtong', name: '', model: '', cloned: false }
 }
 // 把克隆成功的声线绑定到指定角色（bind 为空则解绑）
 export function petBindCloneVoice(skinId, bind) {
@@ -316,22 +368,26 @@ export function applyPetSkin(id) {
   }
   save()
   const voice = petSkinVoiceOf(s.id)
-  if (voice && (voice.cloned || voice.preset) && voice.voice) {
-    // 克隆/绑定声线或内置专属声线 → 切到该角色即用对应声线
-    const v = voice
-    if (v.engine === 'glm' && store.cfg.ttsGm) store.cfg.ttsGm.voice = v.voice
-    if (v.engine === 'openai' && store.cfg.ttsOpenAI) {
-      store.cfg.ttsOpenAI.voice = v.voice
-      if (v.model) store.cfg.ttsOpenAI.model = v.model
+  const voiceMap = petVoiceMapOf(s.id)
+  if (voice && (voice.cloned || voice.preset) && voice.voice && Object.keys(voiceMap).length) {
+    // 内置角色把各真人引擎都写成自己的身份声线。朗读时仍以 voiceMap 为准，
+    // 这里同步设置页只用于展示和兼容旧代码，不能再把角色声线落成全局默认音色。
+    for (const [eng, v] of Object.entries(voiceMap)) {
+      if (!v || !v.voice) continue
+      if (eng === 'glm' && store.cfg.ttsGm) store.cfg.ttsGm.voice = v.voice
+      if (eng === 'openai' && store.cfg.ttsOpenAI) {
+        store.cfg.ttsOpenAI.voice = v.voice
+        if (v.model) store.cfg.ttsOpenAI.model = v.model
+      }
+      if (eng === 'dash' && store.cfg.ttsDash) {
+        store.cfg.ttsDash.voice = v.voice
+        store.cfg.ttsDash.voiceCustom = v.voiceCustom || ''
+      }
+      if (eng === 'edge') store.cfg.ttsEdgeVoice = v.voice
     }
-    if (v.engine === 'dash' && store.cfg.ttsDash) {
-      store.cfg.ttsDash.voice = v.voice
-      store.cfg.ttsDash.voiceCustom = v.voiceCustom || ''
-    }
-    if (v.engine === 'edge') store.cfg.ttsEdgeVoice = v.voice
     // 只有该引擎确实可用（有 Key / 免费）时才把朗读引擎切过去；
     // 否则会出现「切到某角色后朗读直接失败」——例如角色绑的是智谱克隆声线，但用户没配智谱 Key。
-    if (v.engine && presetEngineReady(v.engine) && store.cfg.ttsMode !== v.engine) store.cfg.ttsMode = v.engine
+    if (voice.engine && presetEngineReady(voice.engine) && store.cfg.ttsMode !== voice.engine) store.cfg.ttsMode = voice.engine
   } else {
     // 未绑定 → 恢复全局音色（用户自己在「语音」里选的大模型声音），保持全局一致
     const g = store.cfg.globalVoice
@@ -506,14 +562,46 @@ export function petRead(text, opts = {}) {
 export function petSpeakOpts() {
   const id = petSkin.value && petSkin.value.id
   if (!id) return {}
+  const identityMap = petVoiceMapOf(id)
+  const hasIdentity = Object.keys(identityMap).length > 1 || !!(PET_SKINS.find((s) => s.id === id) && SKIN_PRESET_VOICES[id])
+  if (hasIdentity && identityMap) {
+    const v = petSkinVoiceOf(id)
+    if (!v || !v.voice) return {}
+    const engine = v.engine || store.cfg.ttsMode || 'glm'
+    const selected = identityMap[engine] || v
+    return {
+      engine,
+      voice: selected.voice || v.voice,
+      model: selected.model || v.model || '',
+      voiceCustom: selected.voiceCustom || v.voiceCustom || '',
+      petId: v.petId || id,
+      petName: v.petName || (petSkin.value && petSkin.value.char) || '',
+      voiceName: v.voiceName || selected.voiceName || selected.name || '',
+      identityLocked: true,
+      voiceMap: identityMap
+    }
+  }
+  const binding = petVoiceBindingOf(id)
+  if (binding && binding.voice && presetEngineReady(binding.engine)) {
+    return {
+      engine: binding.engine,
+      voice: binding.voice,
+      model: binding.model || PET_ENGINE_MODELS[binding.engine] || '',
+      voiceCustom: binding.voiceCustom || '',
+      petId: id,
+      petName: (petSkin.value && petSkin.value.char) || binding.name || id,
+      voiceName: binding.name || '',
+      voiceMap: identityMap
+    }
+  }
   const v = petSkinVoiceOf(id)
   if (!v || !v.voice) return {}
   const engine = v.engine || store.cfg.ttsMode || 'glm'
-  // 目标引擎没配好就不要硬切（角色绑了智谱克隆但没智谱 Key 时会读不出来）→ 交回全局音色
   if (!presetEngineReady(engine)) return {}
-  const out = { voice: v.voice, engine }
+  const out = { voice: v.voice, engine, petId: v.petId || id, petName: v.petName || '', voiceName: v.voiceName || '' }
   if (engine === 'dash' && v.voiceCustom) out.voiceCustom = v.voiceCustom
   if (v.model) out.model = v.model
+  if (Object.keys(identityMap).length) out.voiceMap = identityMap
   return out
 }
 export function petStop() {

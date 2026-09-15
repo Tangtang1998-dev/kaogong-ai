@@ -299,3 +299,7 @@ node_modules/
 /10_授权工具/private-key.json
 /10_授权工具/smoke-*.png
 /10_授权工具/__pycache__/
+
+# 独立交付仓库：各自维护 Git，不纳入主仓
+/08_OfflinePaidWeb/
+/09_OfflinePaidApp/

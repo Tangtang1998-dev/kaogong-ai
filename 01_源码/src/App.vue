@@ -32,7 +32,7 @@ import { runGitHubSync, runGitHubUpload, runGitHubDownload } from './utils/githu
 import { runGiteeSync, runGiteeUpload, runGiteeDownload } from './utils/giteeSync'
 import { genLogSize, exportGenLog, clearGenLog } from './utils/quizLog'
 import { authState, authInit, authHasUsers, authRegister, authLogin, authLogout, authChangePass, authDeleteUser, authSetEnabled, authResetLocal } from './utils/auth'
-import { licenseState, licenseInit } from './utils/license'
+import { licenseState, licenseInit, refreshLicenseClock } from './utils/license'
 import { pickDataFolder, saveAllDataToFolder, getFolderName } from './utils/localData'
 import { downloadBackup, shareBackup, restoreAll } from './utils/dataBackup'
 import { detectNative, nativeWriteFile, nativeBackupPath, startNativeAutoBackup, stopNativeAutoBackup } from './utils/nativeSave'
@@ -2464,9 +2464,21 @@ const _unAndroidBack = onHardwareBack(handleAndroidBack)
 try { onUnmounted(() => { try { _unAndroidBack() } catch (e) {} }) } catch (e) {}
 installPlusBackBehavior({ onFirstBack: () => { try { nativeToast('再按一次退出') } catch (e) {} } })
 if (isNativeHost()) { try { installNativeBackBehavior() } catch (e) {} } // 自建宿主：返回键走同一套 onHardwareBack 链
+let licenseClockTimer = null
+let renewalToasted = false
+function refreshLicenseReminder() {
+  refreshLicenseClock()
+  if (licenseState.renewalDue && !renewalToasted) {
+    renewalToasted = true
+    showToast('💎 ' + licenseState.renewalMessage, 'warning')
+  }
+}
 onMounted(() => {
   authGateInit()
-  licenseInit()
+  licenseInit().then(() => {
+    refreshLicenseReminder()
+    if (!licenseClockTimer) licenseClockTimer = setInterval(refreshLicenseReminder, 60000)
+  })
   clampFloatPos()
   refreshSyncUi()
   if (wdAuto.value || ghAuto.value || geAuto.value) {
@@ -2486,6 +2498,7 @@ onMounted(() => {
   window.addEventListener('hashchange', onHashChange)
 })
 onUnmounted(() => {
+  if (licenseClockTimer) { clearInterval(licenseClockTimer); licenseClockTimer = null }
   if (wallTimer) { clearInterval(wallTimer); wallTimer = null }
   if (syncTimer) { clearInterval(syncTimer); syncTimer = null }
   if (cloudApplyTimer) { clearTimeout(cloudApplyTimer); cloudApplyTimer = null }

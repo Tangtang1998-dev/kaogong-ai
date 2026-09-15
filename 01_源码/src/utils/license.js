@@ -7,6 +7,7 @@ const STORAGE_KEY = 'xc_offline_license_v1'
 const DEVICE_KEY = 'xc_device_code_v1'
 const TRIAL_DAYS = 7
 const TRIAL_POINTS = 30
+const RENEWAL_REMIND_DAYS = 3
 export const TRIAL_POINT_COSTS = Object.freeze({ chat: 5, feature: 1 })
 const PUBLIC_JWK = { kty: 'EC', crv: 'P-256', x: '_eTtxfkTlCNxT5oL_JlxK9Vy5poKtJrNPhPl738Ctlo', y: 'ofbmtixWhaQQTyFgirnWvB7CLdkR7Pys7exu04RDLhc' }
 
@@ -41,6 +42,20 @@ export function trialPointCost(kind = 'feature') {
   return kind === 'chat' ? TRIAL_POINT_COSTS.chat : TRIAL_POINT_COSTS.feature
 }
 
+export function paidRenewalState(expiresAt, nowMs = Date.now()) {
+  const exp = Number(expiresAt) || 0
+  const leftMs = exp - nowMs
+  const daysLeft = leftMs > 0 ? Math.max(0, Math.ceil(leftMs / 86400000)) : 0
+  const expired = !(leftMs > 0)
+  const due = !expired && daysLeft <= RENEWAL_REMIND_DAYS
+  return {
+    daysLeft,
+    expired,
+    due,
+    message: expired ? '正式会员已到期，AI 功能已停止，请续订后重新激活。' : due ? '会员将在 ' + daysLeft + ' 天内到期，请提前续订，避免到期后中断使用。' : ''
+  }
+}
+
 export const licenseState = reactive({
   ready: false,
   active: true,
@@ -52,6 +67,9 @@ export const licenseState = reactive({
   licenseId: '',
   trialPoints: TRIAL_POINTS,
   trialDaysLeft: TRIAL_DAYS,
+  paidDaysLeft: 0,
+  renewalDue: false,
+  renewalMessage: '',
   viewOnly: false,
   message: ''
 })
@@ -140,23 +158,62 @@ function applyTrial() {
   return false
 }
 
+function applyPaid(payload) {
+  licenseState.ready = true
+  licenseState.active = true
+  licenseState.mode = 'paid'
+  licenseState.plan = payload.plan || 'month'
+  licenseState.planName = (PLANS.find((x) => x.id === payload.plan) || {}).name || '正式套餐'
+  licenseState.expiresAt = Number(payload.exp) || 0
+  licenseState.licenseId = String(payload.lid || '')
+  licenseState.renewalDue = false
+  licenseState.renewalMessage = ''
+  refreshLicenseClock()
+}
+
+export function refreshLicenseClock(nowMs = Date.now()) {
+  if (!licenseState.ready) return licenseState
+  if (licenseState.mode === 'paid') {
+    const r = paidRenewalState(licenseState.expiresAt, nowMs)
+    licenseState.paidDaysLeft = r.daysLeft
+    licenseState.renewalDue = r.due
+    licenseState.renewalMessage = r.message
+    if (r.expired) {
+      licenseState.active = false
+      licenseState.mode = 'expired'
+      licenseState.message = r.message
+    } else {
+      licenseState.active = true
+      licenseState.message = '已激活 · 剩余 ' + r.daysLeft + ' 天 · 到期 ' + new Date(licenseState.expiresAt).toLocaleDateString('zh-CN')
+    }
+    return licenseState
+  }
+  if (licenseState.mode === 'trial') applyTrial()
+  return licenseState
+}
+
 export async function licenseInit() {
   licenseState.deviceCode = getDeviceCode()
   const saved = readJson(STORAGE_KEY, null)
   if (saved && saved.code) {
     const r = await verifyLicenseCode(saved.code, licenseState.deviceCode)
     if (r.ok) {
-      const p = r.payload
-      licenseState.active = true
-      licenseState.mode = 'paid'
-      licenseState.plan = p.plan || 'month'
-      licenseState.planName = (PLANS.find((x) => x.id === p.plan) || {}).name || '正式套餐'
-      licenseState.expiresAt = Number(p.exp) || 0
-      licenseState.licenseId = String(p.lid || '')
-      licenseState.message = '已激活 · 到期 ' + new Date(licenseState.expiresAt).toLocaleDateString('zh-CN')
+      applyPaid(r.payload)
       licenseState.ready = true
       return licenseState
     }
+    // 已购买但激活码过期/损坏时，绝不再回退到试用点数。
+    licenseState.active = false
+    licenseState.mode = 'expired'
+    licenseState.plan = ''
+    licenseState.planName = '会员已到期'
+    licenseState.expiresAt = 0
+    licenseState.paidDaysLeft = 0
+    licenseState.renewalDue = false
+    licenseState.renewalMessage = ''
+    licenseState.message = '正式会员已到期或授权失效，AI 功能已停止，请续订后重新激活。'
+    licenseState.ready = true
+    return licenseState
   }
   applyTrial()
   licenseState.licenseId = ''
@@ -208,4 +265,4 @@ export function licenseDeviceCode() {
   return getDeviceCode()
 }
 
-export default { PLANS, PROMOTION, TRIAL_POINT_COSTS, promotionState, planPrice, trialPointCost, licenseState, licenseInit, activateLicenseCode, verifyLicenseCode, requireLicense, consumeLicensePoints, licenseDeviceCode }
+export default { PLANS, PROMOTION, TRIAL_POINT_COSTS, promotionState, planPrice, trialPointCost, paidRenewalState, refreshLicenseClock, licenseState, licenseInit, activateLicenseCode, verifyLicenseCode, requireLicense, consumeLicensePoints, licenseDeviceCode }

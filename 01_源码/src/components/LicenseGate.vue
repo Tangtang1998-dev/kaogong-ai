@@ -68,7 +68,7 @@ function viewOnly() {
       <div class="license-status" :class="{ ok: licenseState.active }">
         <span>当前方案</span>
         <b>{{ licenseState.planName }}</b>
-        <em v-if="licenseState.mode === 'paid'">到期：{{ expireText }}</em>
+        <em v-if="licenseState.mode === 'paid'">剩余 {{ licenseState.paidDaysLeft }} 天 · 到期：{{ expireText }}</em>
         <em v-else-if="licenseState.mode === 'trial'">剩余 {{ licenseState.trialDaysLeft }} 天 · {{ licenseState.trialPoints }} 点</em>
       </div>
 
@@ -76,6 +76,16 @@ function viewOnly() {
         <b>试用点数规则</b>
         <p>普通 AI 对话每次消耗 5 点；错题整理、AI 出题、微课、萌宠分析等其他 AI 功能每次消耗 1 点。</p>
         <p>点数耗尽后，所有 AI 功能会立即停止，不会继续调用模型；学习数据、错题和设置仍可查看与导出。</p>
+      </div>
+
+      <div v-else-if="licenseState.mode === 'paid'" class="license-points-rule paid">
+        <b>正式会员无点数限制</b>
+        <p>你使用自己的 API Key，会员有效期内所有 AI 功能都不消耗试用点数；正式会员只受到期时间约束。</p>
+      </div>
+
+      <div v-if="licenseState.renewalDue" class="license-renewal">
+        <b>续订提醒</b>
+        <p>{{ licenseState.renewalMessage }}</p>
       </div>
 
       <div v-if="promo.active" class="license-promo">
@@ -121,6 +131,7 @@ function viewOnly() {
           <li>更换设备、卸载软件、清除浏览器站点数据、清除应用数据、恢复出厂设置、使用无痕模式、修改系统时间、使用非官方修改版本等个人操作导致会员丢失或失效的，本店概不负责；核对订单后可在合理范围内协助迁移。</li>
           <li>激活码与到期时间以签发记录为准。请勿公开转发激活码，避免被他人滥用。</li>
           <li>所有套餐均为一次付款、固定有效期，不自动续费、不自动扣款、不默认续约。</li>
+          <li>正式会员使用自己的 API Key，会员期内不消耗试用点数；到期前 3 天开始提醒续订，到期后统一停止 AI 功能。</li>
           <li>虚拟商品激活后不支持无理由退款；未激活且未使用的订单，请付款前与管理员确认规则。</li>
           <li>本周日活动仅限 2026-09-20 08:00–22:00 内完成付款的订单，每种订阅立减 5 元；过期不补、不可追溯、不与其他优惠叠加。</li>
         </ul>
@@ -166,6 +177,10 @@ function viewOnly() {
 .license-points-rule { margin-top: 10px; padding: 10px 12px; border: 1px solid var(--glass-border); border-radius: 11px; background: rgba(127,127,127,.04); }
 .license-points-rule b { font-size: calc(12.5px * var(--ui-fs-scale, 1)); }
 .license-points-rule p { margin: 5px 0 0; color: var(--text2); font-size: calc(11px * var(--ui-fs-scale, 1)); line-height: 1.6; }
+.license-points-rule.paid { border-color: rgba(52,211,153,.38); background: rgba(52,211,153,.07); }
+.license-renewal { margin-top: 10px; padding: 10px 12px; border: 1px solid rgba(251,191,36,.55); border-radius: 11px; color: var(--text); background: rgba(251,191,36,.12); }
+.license-renewal b { font-size: calc(12.5px * var(--ui-fs-scale, 1)); }
+.license-renewal p { margin: 5px 0 0; color: var(--text2); font-size: calc(11px * var(--ui-fs-scale, 1)); line-height: 1.6; }
 .license-status em { grid-column: 1 / -1; color: var(--text3); font-size: calc(11px * var(--ui-fs-scale, 1)); font-style: normal; }
 .license-plans { display: grid; grid-template-columns: repeat(auto-fit, minmax(132px, 1fr)); gap: 8px; margin: 14px 0 10px; }
 .license-plan { min-width: 0; padding: 10px; border: 1px solid var(--glass-border); border-radius: 10px; background: rgba(127,127,127,.06); color: var(--text); text-align: left; cursor: pointer; font: inherit; }

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { PLANS, TRIAL_POINT_COSTS, licenseState, licenseInit, consumeLicensePoints, verifyLicenseCode, promotionState, planPrice, trialPointCost } from '../utils/license'
+import { PLANS, TRIAL_POINT_COSTS, licenseState, licenseInit, activateLicenseCode, consumeLicensePoints, verifyLicenseCode, promotionState, planPrice, trialPointCost, paidRenewalState } from '../utils/license'
 
 const mem = new Map()
 globalThis.localStorage = {
@@ -69,5 +69,23 @@ describe('离线授权', () => {
     expect(licenseState.active).toBe(false)
     expect(consumeLicensePoints(trialPointCost('chat')).ok).toBe(false)
     expect(consumeLicensePoints(trialPointCost('feature')).ok).toBe(false)
+  })
+
+  it('正式会员不消耗试用点数，只受到期时间限制', async () => {
+    localStorage.setItem('xc_device_code_v1', 'XC-TEST-0000-0001')
+    const a = await activateLicenseCode(CODE)
+    expect(a.ok).toBe(true)
+    expect(licenseState.mode).toBe('paid')
+    const before = licenseState.trialPoints
+    const r = consumeLicensePoints(999)
+    expect(r).toMatchObject({ ok: true, cost: 0 })
+    expect(licenseState.trialPoints).toBe(before)
+  })
+
+  it('会员到期前 3 天进入续订提醒，到期后强制停用', () => {
+    const now = Date.parse('2026-09-15T12:00:00+08:00')
+    expect(paidRenewalState(now + 4 * 86400000, now).due).toBe(false)
+    expect(paidRenewalState(now + 3 * 86400000, now)).toMatchObject({ due: true, daysLeft: 3, expired: false })
+    expect(paidRenewalState(now - 1, now)).toMatchObject({ due: false, daysLeft: 0, expired: true })
   })
 })

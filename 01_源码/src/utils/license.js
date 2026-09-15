@@ -17,7 +17,7 @@ export const PLANS = [
   { id: 'halfyear', name: '半年卡', price: 169, days: 180, tag: '半年备考', summary: '一次购买，连续使用 180 天', details: ['适合半年以上系统备考', '到期后不自动扣款，无需绑定支付账户', '授权仍绑定当前设备码，续期时重新签发'] },
   { id: 'year', name: '年卡', price: 299, days: 365, tag: '长期备考', summary: '一次购买，连续使用 365 天', details: ['适合全年国考、省考连续备考', '到期后不自动扣款，不会有隐藏续费', '一年内无需重复购买，授权仍绑定当前设备码'] },
   { id: 'gk', name: '国考季票', price: 129, exam: 'national', tag: '考试周期', summary: '覆盖国考备考周期至笔试结束', details: ['有效期至 2026-12-06 国考笔试结束', '适合全程备考国考的考生', '到期后不自动续费'] },
-  { id: 'province', name: '省考季票', price: 129, exam: 'province', tag: '考试周期', summary: '覆盖指定省份省考备考周期', details: ['有效期按所选省考考试周期签发', '适合明确参加某一省省考的考生', '续期或考试时间变化时重新签发新码'] }
+  { id: 'province', name: '省考季票', price: 159, exam: 'province', tag: '考试周期', summary: '覆盖指定省份省考备考周期', details: ['有效期按所选省考考试周期签发', '适合明确参加某一省省考的考生', '续期或考试时间变化时重新签发新码'] }
 ]
 
 export const PROMOTION = {
@@ -29,7 +29,15 @@ export const PROMOTION = {
 
 export function promotionState(nowMs = Date.now()) {
   const active = nowMs >= PROMOTION.startsAt && nowMs <= PROMOTION.endsAt
-  return { ...PROMOTION, active, text: active ? PROMOTION.name : '本活动已结束' }
+  const upcoming = nowMs < PROMOTION.startsAt
+  const ended = nowMs > PROMOTION.endsAt
+  const state = active ? 'active' : upcoming ? 'upcoming' : 'ended'
+  const text = active
+    ? '活动进行中：所有会员立减 5 元'
+    : upcoming
+      ? '活动预告：2026-09-20 周日 08:00–22:00 所有会员立减 5 元'
+      : '本活动已结束，恢复原价'
+  return { ...PROMOTION, active, upcoming, ended, state, text }
 }
 
 export function planPrice(plan, nowMs = Date.now()) {

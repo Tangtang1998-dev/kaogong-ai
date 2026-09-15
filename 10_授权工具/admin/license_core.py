@@ -71,7 +71,7 @@ PLANS: dict[str, dict[str, Any]] = {
     },
     "province": {
         "name": "省考季票",
-        "price": 129,
+        "price": 159,
         "description": "有效期由管理员按本省考试周期设置",
     },
 }
